@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>じゃんけんバトル</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .screen { display: none; width: 100%; max-width: 400px; text-align: center; }
+    .screen.active { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+
+    h1 { font-size: 1.8em; margin-bottom: 8px; }
+    h2 { font-size: 1.4em; color: #aaa; }
+
+    .emoji-large { font-size: 4em; }
+
+    input[type="text"] {
+      width: 100%;
+      max-width: 300px;
+      padding: 14px 18px;
+      font-size: 1.1em;
+      border: 2px solid #444;
+      border-radius: 12px;
+      background: #16213e;
+      color: #eee;
+      outline: none;
+      text-align: center;
+    }
+    input[type="text"]:focus { border-color: #6c63ff; }
+
+    .btn {
+      padding: 14px 32px;
+      font-size: 1.1em;
+      font-weight: bold;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: transform 0.1s, opacity 0.2s;
+      color: #fff;
+    }
+    .btn:active { transform: scale(0.95); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .btn-primary { background: #6c63ff; }
+    .btn-primary:hover:not(:disabled) { background: #5a52d5; }
+
+    .hand-buttons {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .hand-btn {
+      width: 100px;
+      height: 100px;
+      font-size: 3em;
+      border: 3px solid #444;
+      border-radius: 20px;
+      background: #16213e;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .hand-btn:hover { border-color: #6c63ff; background: #1a1a4e; }
+    .hand-btn:active { transform: scale(0.9); }
+    .hand-btn.selected { border-color: #6c63ff; background: #2a2a6e; box-shadow: 0 0 20px rgba(108,99,255,0.4); }
+    .hand-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .player-list {
+      width: 100%;
+      list-style: none;
+      text-align: left;
+    }
+    .player-list li {
+      padding: 10px 16px;
+      background: #16213e;
+      border-radius: 8px;
+      margin-bottom: 6px;
+      font-size: 1em;
+    }
+
+    .countdown {
+      font-size: 6em;
+      font-weight: bold;
+      color: #6c63ff;
+      animation: pulse 0.5s ease-in-out;
+    }
+    @keyframes pulse {
+      0% { transform: scale(0.5); opacity: 0; }
+      50% { transform: scale(1.2); }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+    .result-card {
+      background: #16213e;
+      border-radius: 16px;
+      padding: 20px;
+      width: 100%;
+    }
+
+    .result-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid #2a2a4e;
+    }
+    .result-item:last-child { border-bottom: none; }
+
+    .winner { color: #ffd700; font-weight: bold; }
+    .status { color: #888; font-size: 0.9em; }
+
+    .room-code {
+      background: #6c63ff;
+      padding: 8px 20px;
+      border-radius: 8px;
+      font-size: 1.4em;
+      font-weight: bold;
+      letter-spacing: 3px;
+    }
+
+    .ranking-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      background: #16213e;
+      border-radius: 12px;
+      margin-bottom: 8px;
+      width: 100%;
+    }
+    .ranking-item.first { background: rgba(255,215,0,0.15); border: 2px solid #ffd700; }
+    .rank-num { font-size: 1.8em; min-width: 40px; }
+    .rank-name { flex: 1; font-size: 1.1em; }
+    .rank-wins { font-weight: bold; font-size: 1.1em; }
+  </style>
+</head>
+<body>
+
+  <!-- 参加画面 -->
+  <div id="join-screen" class="screen active">
+    <div class="emoji-large">✊✌️✋</div>
+    <h1>じゃんけんバトル</h1>
+    <div class="room-code" id="room-code-display">---</div>
+    <input type="text" id="nickname" placeholder="ニックネームを入力" maxlength="10" autocomplete="off">
+    <button class="btn btn-primary" id="join-btn" disabled>参加する</button>
+  </div>
+
+  <!-- 待機画面 -->
+  <div id="waiting-screen" class="screen">
+    <h2>ホストの開始を待っています...</h2>
+    <div class="status" id="waiting-status">接続中...</div>
+    <h3 style="align-self: flex-start;">参加者</h3>
+    <ul class="player-list" id="player-list"></ul>
+  </div>
+
+  <!-- ゲーム画面 -->
+  <div id="game-screen" class="screen">
+    <h2 id="round-label">Round 1 / 3</h2>
+    <div id="game-status"></div>
+    <div id="countdown-display" class="countdown" style="display:none;"></div>
+    <div class="hand-buttons" id="hand-buttons" style="display:none;">
+      <button class="hand-btn" data-hand="rock">✊</button>
+      <button class="hand-btn" data-hand="scissors">✌️</button>
+      <button class="hand-btn" data-hand="paper">✋</button>
+    </div>
+    <div id="hand-status" style="display:none;" class="status">他の人を待っています...</div>
+
+    <!-- ラウンド結果 -->
+    <div id="round-result" style="display:none;">
+      <h2 id="result-title"></h2>
+      <div class="result-card" id="result-hands"></div>
+    </div>
+  </div>
+
+  <!-- 最終結果画面 -->
+  <div id="result-screen" class="screen">
+    <div class="emoji-large">🏆</div>
+    <h1>最終結果</h1>
+    <div id="ranking-list" style="width:100%;"></div>
+  </div>
+
+  <!-- 部屋閉鎖 -->
+  <div id="closed-screen" class="screen">
+    <div class="emoji-large">👋</div>
+    <h1>部屋が閉じられました</h1>
+    <p class="status">ありがとうございました！</p>
+  </div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+(function() {
+  // ===== 設定 =====
+  // TODO: Supabase プロジェクトの値に置き換えてください
+  const SUPABASE_URL = 'https://eixvkfbdplxgpypxjtml.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVpeHZrZmJkcGx4Z3B5cHhqdG1sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQzMjI5NjksImV4cCI6MjA3OTg5ODk2OX0.vmSeqMS6DQW_gFk9rIhq2lj_x9RTgncBFfhSb9_i0y8';
+
+  // ===== 状態 =====
+  const params = new URLSearchParams(window.location.search);
+  const roomId = params.get('room');
+  const playerId = crypto.randomUUID();
+  let channel = null;
+  let myName = '';
+  let handSent = false;
+
+  // ===== DOM =====
+  const $ = id => document.getElementById(id);
+
+  // 画面切り替え
+  function showScreen(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    $(id).classList.add('active');
+  }
+
+  // ===== 初期化 =====
+  if (!roomId) {
+    $('room-code-display').textContent = 'エラー';
+    $('join-btn').disabled = true;
+    return;
+  }
+
+  $('room-code-display').textContent = roomId;
+
+  const nicknameInput = $('nickname');
+  const joinBtn = $('join-btn');
+
+  nicknameInput.addEventListener('input', () => {
+    joinBtn.disabled = !nicknameInput.value.trim();
+  });
+
+  // ===== 参加処理 =====
+  joinBtn.addEventListener('click', async () => {
+    myName = nicknameInput.value.trim();
+    if (!myName) return;
+
+    joinBtn.disabled = true;
+    joinBtn.textContent = '接続中...';
+
+    try {
+      const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+      channel = supabase.channel(`room-${roomId}`, { config: { broadcast: { self: true } } });
+
+      // イベントリスナー登録
+      channel.on('broadcast', { event: 'players' }, ({ payload }) => onPlayers(payload));
+      channel.on('broadcast', { event: 'round_start' }, ({ payload }) => onRoundStart(payload));
+      channel.on('broadcast', { event: 'countdown' }, ({ payload }) => onCountdown(payload));
+      channel.on('broadcast', { event: 'round_result' }, ({ payload }) => onRoundResult(payload));
+      channel.on('broadcast', { event: 'game_result' }, ({ payload }) => onGameResult(payload));
+      channel.on('broadcast', { event: 'room_closed' }, () => onRoomClosed());
+
+      await channel.subscribe();
+
+      // 参加イベント送信
+      await channel.send({
+        type: 'broadcast',
+        event: 'join',
+        payload: { playerId, name: myName }
+      });
+
+      showScreen('waiting-screen');
+      $('waiting-status').textContent = '接続完了！';
+    } catch (e) {
+      joinBtn.disabled = false;
+      joinBtn.textContent = '参加する';
+      alert('接続エラー: ' + e.message);
+    }
+  });
+
+  // ===== イベントハンドラ =====
+
+  function onPlayers(payload) {
+    const players = payload.players || [];
+    const list = $('player-list');
+    list.innerHTML = '';
+    players.forEach((p, i) => {
+      const li = document.createElement('li');
+      li.textContent = `${i + 1}. ${p.name}`;
+      list.appendChild(li);
+    });
+  }
+
+  function onRoundStart(payload) {
+    handSent = false;
+    showScreen('game-screen');
+    $('round-label').textContent = `Round ${payload.round} / ${payload.total}`;
+    $('game-status').textContent = 'カウントダウン中...';
+    $('countdown-display').style.display = 'block';
+    $('hand-buttons').style.display = 'none';
+    $('hand-status').style.display = 'none';
+    $('round-result').style.display = 'none';
+
+    // 手ボタンのリセット
+    document.querySelectorAll('.hand-btn').forEach(b => {
+      b.classList.remove('selected');
+      b.disabled = false;
+    });
+  }
+
+  function onCountdown(payload) {
+    const count = payload.count;
+    const display = $('countdown-display');
+
+    if (count === 0) {
+      display.textContent = '出して！';
+      display.style.display = 'block';
+      $('game-status').textContent = '';
+
+      // 手選択ボタンを表示
+      setTimeout(() => {
+        display.style.display = 'none';
+        $('hand-buttons').style.display = 'flex';
+      }, 800);
+    } else {
+      display.textContent = count;
+      display.style.display = 'block';
+      // re-trigger animation
+      display.style.animation = 'none';
+      display.offsetHeight; // reflow
+      display.style.animation = '';
+    }
+  }
+
+  function onRoundResult(payload) {
+    const handEmoji = { rock: '✊', scissors: '✌️', paper: '✋' };
+    const hands = payload.hands || {};
+    const winners = payload.winners || [];
+    const isDraw = payload.isDraw;
+
+    showScreen('game-screen');
+    $('hand-buttons').style.display = 'none';
+    $('hand-status').style.display = 'none';
+    $('countdown-display').style.display = 'none';
+    $('game-status').textContent = '';
+
+    const resultDiv = $('round-result');
+    resultDiv.style.display = 'block';
+
+    $('result-title').textContent = isDraw ? 'あいこ！🔄' : '結果発表！';
+    $('result-title').style.color = isDraw ? '#ffd700' : '#6c63ff';
+
+    // 結果一覧を表示（簡易: playerIdだけなので名前の解決は限定的）
+    const handsDiv = $('result-hands');
+    handsDiv.innerHTML = '';
+
+    // 自分の結果を強調
+    const myHand = hands[playerId];
+    const iWon = winners.includes(playerId);
+
+    if (isDraw) {
+      handsDiv.innerHTML = `<p style="font-size:1.2em;padding:12px;">あいこです！もう一回！</p>`;
+    } else {
+      handsDiv.innerHTML = `
+        <p style="font-size:2em;padding:12px;">
+          ${iWon ? '🎉 勝ち！' : '😢 負け...'}
+        </p>
+        <p style="color:#888;">あなたの手: ${handEmoji[myHand] || '?'}</p>
+      `;
+    }
+  }
+
+  function onGameResult(payload) {
+    const ranking = payload.ranking || [];
+    showScreen('result-screen');
+
+    const list = $('ranking-list');
+    list.innerHTML = '';
+    const medals = ['🥇', '🥈', '🥉'];
+
+    ranking.forEach((p, i) => {
+      const div = document.createElement('div');
+      div.className = 'ranking-item' + (i === 0 ? ' first' : '');
+      div.innerHTML = `
+        <span class="rank-num">${medals[i] || (i + 1)}</span>
+        <span class="rank-name">${p.name}${p.id === playerId ? ' (あなた)' : ''}</span>
+        <span class="rank-wins">${p.wins}勝</span>
+      `;
+      list.appendChild(div);
+    });
+  }
+
+  function onRoomClosed() {
+    showScreen('closed-screen');
+    if (channel) {
+      channel.unsubscribe();
+      channel = null;
+    }
+  }
+
+  // ===== 手の選択 =====
+  document.querySelectorAll('.hand-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (handSent) return;
+      handSent = true;
+
+      const hand = btn.dataset.hand;
+      btn.classList.add('selected');
+
+      // 全ボタン無効化
+      document.querySelectorAll('.hand-btn').forEach(b => b.disabled = true);
+
+      // 送信
+      channel.send({
+        type: 'broadcast',
+        event: 'hand',
+        payload: { playerId, hand }
+      });
+
+      $('hand-buttons').style.display = 'none';
+      $('hand-status').style.display = 'block';
+      $('hand-status').textContent = '送信済み！他の人を待っています...';
+    });
+  });
+
+})();
+</script>
+</body>
+</html>
