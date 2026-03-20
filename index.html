@@ -258,12 +258,15 @@
       channel = supabase.channel(`room-${roomId}`, { config: { broadcast: { self: true } } });
 
       // イベントリスナー登録
-      channel.on('broadcast', { event: 'players' }, ({ payload }) => onPlayers(payload));
-      channel.on('broadcast', { event: 'round_start' }, ({ payload }) => onRoundStart(payload));
-      channel.on('broadcast', { event: 'countdown' }, ({ payload }) => onCountdown(payload));
-      channel.on('broadcast', { event: 'round_result' }, ({ payload }) => onRoundResult(payload));
-      channel.on('broadcast', { event: 'game_result' }, ({ payload }) => onGameResult(payload));
-      channel.on('broadcast', { event: 'room_closed' }, () => onRoomClosed());
+      // supabase-js v2 のコールバック引数はメッセージ全体が来る場合とpayloadだけの場合がある
+      const unwrap = (msg) => msg?.payload ?? msg;
+
+      channel.on('broadcast', { event: 'players' }, (msg) => { console.log('players', msg); onPlayers(unwrap(msg)); });
+      channel.on('broadcast', { event: 'round_start' }, (msg) => { console.log('round_start', msg); onRoundStart(unwrap(msg)); });
+      channel.on('broadcast', { event: 'countdown' }, (msg) => { console.log('countdown', msg); onCountdown(unwrap(msg)); });
+      channel.on('broadcast', { event: 'round_result' }, (msg) => { console.log('round_result', msg); onRoundResult(unwrap(msg)); });
+      channel.on('broadcast', { event: 'game_result' }, (msg) => { console.log('game_result', msg); onGameResult(unwrap(msg)); });
+      channel.on('broadcast', { event: 'room_closed' }, (msg) => { console.log('room_closed', msg); onRoomClosed(); });
 
       await channel.subscribe();
 
