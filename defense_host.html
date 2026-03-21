@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Defense Host 3D</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #1a1a2e; overflow: hidden; }
+    canvas { display: block; width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const SQRT3 = Math.sqrt(3);
+
+const TILE_COLORS = {
+  grass:    0x4CAF50,
+  water:    0x2196F3,
+  mountain: 0x9E9E9E,
+  forest:   0x2E7D32,
+  sand:     0xFFEB3B,
+  village:  0xFF9800,
+};
+
+const TILE_HEIGHTS = {
+  grass: 0.0,
+  water: -0.1,
+  mountain: 0.5,
+  forest: 0.15,
+  sand: 0.0,
+  village: 0.1,
+};
+
+// ===== Three.js setup =====
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setClearColor(0x1a1a2e);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 200);
+camera.position.set(0, 12, 10);
+camera.lookAt(0, 0, 0);
+
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.1;
+controls.maxPolarAngle = Math.PI / 2.2;
+
+// Lighting
+scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+dirLight.position.set(-5, 10, 5);
+scene.add(dirLight);
+const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
+fillLight.position.set(5, 5, -5);
+scene.add(fillLight);
+
+// Raycaster
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+
+// State
+let tileMeshes = {};        // "q,r" -> mesh
+let tileGroup = new THREE.Group();
+scene.add(tileGroup);
+let unitMeshes = {};         // unitId -> { sphere, hpBar, stoneMarker }
+let unitGroup = new THREE.Group();
+scene.add(unitGroup);
+let highlightMeshes = [];
+let magicCircleLight = null;
+let magicRing = null;
+let magicCircle = { q: 0, r: 0 };
+
+function hexToWorld(q, r) {
+  return {
+    x: SQRT3 * q + SQRT3 / 2 * r,
+    z: 1.5 * r,
+  };
+}
+
+// ===== Window functions (Flutter -> JS) =====
+
+window.buildDefenseWorld = function(payload) {
+  // Clear previous
+  while (tileGroup.children.length) tileGroup.remove(tileGroup.children[0]);
+  tileMeshes = {};
+
+  if (payload.magicCircle) {
+    magicCircle = payload.magicCircle;
+  }
+
+  const tiles = payload.tiles || [];
+  const hexGeo = new THREE.CylinderGeometry(0.9, 0.9, 0.3, 6);
+
+  tiles.forEach(tile => {
+    const { q, r, type } = tile;
+    const color = TILE_COLORS[type] || 0x888888;
+    const height = TILE_HEIGHTS[type] || 0;
+    const mat = new THREE.MeshLambertMaterial({ color });
+    const mesh = new THREE.Mesh(hexGeo, mat);
+
+    const pos = hexToWorld(q, r);
+
+    if (type === 'mountain') {
+      mesh.scale.set(1, 3, 1);
+      mesh.position.set(pos.x, height + 0.45, pos.z);
+    } else {
+      mesh.position.set(pos.x, height, pos.z);
+    }
+
+    mesh.userData = { q, r, type };
+    tileGroup.add(mesh);
+    tileMeshes[`${q},${r}`] = mesh;
+  });
+
+  // Magic circle decoration
+  if (magicCircleLight) scene.remove(magicCircleLight);
+  if (magicRing) scene.remove(magicRing);
+
+  const mcPos = hexToWorld(magicCircle.q, magicCircle.r);
+  magicCircleLight = new THREE.PointLight(0x9c27b0, 2, 5);
+  magicCircleLight.position.set(mcPos.x, 1.5, mcPos.z);
+  scene.add(magicCircleLight);
+
+  const ringGeo = new THREE.RingGeometry(0.5, 0.7, 6);
+  const ringMat = new THREE.MeshBasicMaterial({
+    color: 0xce93d8,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.6,
+  });
+  magicRing = new THREE.Mesh(ringGeo, ringMat);
+  magicRing.rotation.x = -Math.PI / 2;
+  magicRing.position.set(mcPos.x, 0.16, mcPos.z);
+  scene.add(magicRing);
+
+  // Camera
+  const radius = payload.radius || 3;
+  camera.position.set(0, radius * 2.5, radius * 2);
+  camera.lookAt(0, 0, 0);
+  controls.target.set(0, 0, 0);
+};
+
+window.updateDefenseState = function(payload) {
+  const units = payload.units || [];
+  const tiles = payload.tiles || [];
+
+  // Update stone markers on tiles
+  tiles.forEach(t => {
+    const key = `${t.q},${t.r}`;
+    const mesh = tileMeshes[key];
+    if (!mesh) return;
+    // Remove old stone markers
+    const old = mesh.children.filter(c => c.userData.isStone);
+    old.forEach(c => mesh.remove(c));
+    // Add stone markers
+    if (t.stones > 0) {
+      for (let i = 0; i < t.stones && i < 3; i++) {
+        const stoneGeo = new THREE.OctahedronGeometry(0.12);
+        const stoneMat = new THREE.MeshLambertMaterial({ color: 0xffbf00 });
+        const stoneMesh = new THREE.Mesh(stoneGeo, stoneMat);
+        const angle = (i / Math.max(t.stones, 1)) * Math.PI * 2;
+        stoneMesh.position.set(Math.cos(angle) * 0.3, 0.3, Math.sin(angle) * 0.3);
+        stoneMesh.userData.isStone = true;
+        mesh.add(stoneMesh);
+      }
+    }
+  });
+
+  // Update units
+  const activeIds = new Set();
+
+  units.forEach(u => {
+    activeIds.add(u.id);
+    const pos = hexToWorld(u.q, u.r);
+    const tileH = TILE_HEIGHTS[tiles.find(t => t.q === u.q && t.r === u.r)?.type] || 0;
+    const baseY = Math.max(tileH, 0) + 0.15;
+
+    if (unitMeshes[u.id]) {
+      // Update position
+      const obj = unitMeshes[u.id];
+      obj.sphere.position.set(pos.x, baseY + obj.radius, pos.z);
+
+      // Update HP bar
+      updateHpBar(obj, u, pos, baseY);
+
+      // Update stone marker
+      updateStoneMarker(obj, u, pos, baseY);
+
+      // Hide dead enemies
+      obj.sphere.visible = u.hp > 0 || u.type === 'player';
+      if (obj.hpPlane) obj.hpPlane.visible = u.hp > 0;
+      if (obj.hpBg) obj.hpBg.visible = u.hp > 0;
+    } else {
+      // Create new unit mesh
+      let radius, color;
+      if (u.type === 'player') {
+        radius = 0.25; color = 0x64B5F6;
+      } else if (u.type === 'skeleton') {
+        radius = 0.2; color = 0xEF5350;
+      } else {
+        radius = 0.35; color = 0x795548;
+      }
+
+      const geo = new THREE.SphereGeometry(radius, 16, 16);
+      const mat = new THREE.MeshLambertMaterial({ color });
+      const sphere = new THREE.Mesh(geo, mat);
+      sphere.position.set(pos.x, baseY + radius, pos.z);
+      unitGroup.add(sphere);
+
+      const obj = { sphere, radius };
+      unitMeshes[u.id] = obj;
+
+      // HP bar
+      createHpBar(obj, u, pos, baseY);
+
+      // Stone marker
+      updateStoneMarker(obj, u, pos, baseY);
+    }
+  });
+
+  // Remove units no longer present
+  for (const id of Object.keys(unitMeshes)) {
+    if (!activeIds.has(id)) {
+      const obj = unitMeshes[id];
+      if (obj.sphere) unitGroup.remove(obj.sphere);
+      if (obj.hpPlane) unitGroup.remove(obj.hpPlane);
+      if (obj.hpBg) unitGroup.remove(obj.hpBg);
+      if (obj.stoneMark) unitGroup.remove(obj.stoneMark);
+      delete unitMeshes[id];
+    }
+  }
+};
+
+function createHpBar(obj, u, pos, baseY) {
+  const ratio = Math.max(u.hp / u.maxHp, 0);
+  const barW = 0.6;
+  const barH = 0.08;
+
+  // Background
+  const bgGeo = new THREE.PlaneGeometry(barW, barH);
+  const bgMat = new THREE.MeshBasicMaterial({ color: 0x333333, side: THREE.DoubleSide });
+  const bg = new THREE.Mesh(bgGeo, bgMat);
+  bg.position.set(pos.x, baseY + obj.radius * 2 + 0.15, pos.z);
+  bg.lookAt(camera.position);
+  unitGroup.add(bg);
+  obj.hpBg = bg;
+
+  // Fill
+  const fillGeo = new THREE.PlaneGeometry(barW * ratio, barH);
+  const fillColor = ratio > 0.5 ? 0x4caf50 : ratio > 0.25 ? 0xff9800 : 0xf44336;
+  const fillMat = new THREE.MeshBasicMaterial({ color: fillColor, side: THREE.DoubleSide });
+  const fill = new THREE.Mesh(fillGeo, fillMat);
+  fill.position.set(pos.x - (barW * (1 - ratio)) / 2, baseY + obj.radius * 2 + 0.15, pos.z);
+  fill.lookAt(camera.position);
+  unitGroup.add(fill);
+  obj.hpPlane = fill;
+}
+
+function updateHpBar(obj, u, pos, baseY) {
+  const ratio = Math.max(u.hp / u.maxHp, 0);
+  const barW = 0.6;
+  const barH = 0.08;
+  const y = baseY + obj.radius * 2 + 0.15;
+
+  if (obj.hpBg) {
+    obj.hpBg.position.set(pos.x, y, pos.z);
+    obj.hpBg.lookAt(camera.position);
+  }
+
+  if (obj.hpPlane) {
+    unitGroup.remove(obj.hpPlane);
+    obj.hpPlane.geometry.dispose();
+    obj.hpPlane.material.dispose();
+  }
+
+  const fillGeo = new THREE.PlaneGeometry(barW * ratio, barH);
+  const fillColor = ratio > 0.5 ? 0x4caf50 : ratio > 0.25 ? 0xff9800 : 0xf44336;
+  const fillMat = new THREE.MeshBasicMaterial({ color: fillColor, side: THREE.DoubleSide });
+  const fill = new THREE.Mesh(fillGeo, fillMat);
+  fill.position.set(pos.x - (barW * (1 - ratio)) / 2, y, pos.z);
+  fill.lookAt(camera.position);
+  unitGroup.add(fill);
+  obj.hpPlane = fill;
+}
+
+function updateStoneMarker(obj, u, pos, baseY) {
+  if (obj.stoneMark) {
+    unitGroup.remove(obj.stoneMark);
+    obj.stoneMark = null;
+  }
+  if (u.carryingStone) {
+    const geo = new THREE.OctahedronGeometry(0.12);
+    const mat = new THREE.MeshLambertMaterial({ color: 0xffbf00 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(pos.x + 0.3, baseY + obj.radius * 2 + 0.3, pos.z);
+    unitGroup.add(mesh);
+    obj.stoneMark = mesh;
+  }
+}
+
+window.showHighlights = function(coords) {
+  clearHighlightsInternal();
+  const highlightGeo = new THREE.CylinderGeometry(0.95, 0.95, 0.05, 6);
+  const highlightMat = new THREE.MeshBasicMaterial({
+    color: 0xffd740,
+    transparent: true,
+    opacity: 0.5,
+  });
+
+  coords.forEach(c => {
+    const pos = hexToWorld(c.q, c.r);
+    const mesh = new THREE.Mesh(highlightGeo, highlightMat);
+    mesh.position.set(pos.x, 0.2, pos.z);
+    scene.add(mesh);
+    highlightMeshes.push(mesh);
+  });
+};
+
+window.clearHighlights = function() {
+  clearHighlightsInternal();
+};
+
+function clearHighlightsInternal() {
+  highlightMeshes.forEach(m => scene.remove(m));
+  highlightMeshes = [];
+}
+
+// ===== Raycaster click => FlutterBridge =====
+canvas.addEventListener('click', (event) => {
+  pointer.x = (event.clientX / innerWidth) * 2 - 1;
+  pointer.y = -(event.clientY / innerHeight) * 2 + 1;
+
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(tileGroup.children);
+  if (hits.length > 0) {
+    const { q, r } = hits[0].object.userData;
+    if (q !== undefined && r !== undefined) {
+      sendToFlutter({ type: 'hex_click', q, r });
+    }
+  }
+});
+
+function sendToFlutter(data) {
+  if (window.FlutterBridge) {
+    window.FlutterBridge.postMessage(JSON.stringify(data));
+  }
+}
+
+// ===== Resize =====
+function onResize() {
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+}
+onResize();
+window.addEventListener('resize', onResize);
+
+// ===== Animation loop =====
+let clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+
+  // Magic circle glow animation
+  if (magicCircleLight) {
+    const t = clock.getElapsedTime();
+    magicCircleLight.intensity = 1.5 + Math.sin(t * 2) * 0.8;
+  }
+  if (magicRing) {
+    const t = clock.getElapsedTime();
+    magicRing.material.opacity = 0.4 + Math.sin(t * 3) * 0.2;
+  }
+
+  renderer.render(scene, camera);
+}
+animate();
+
+// Notify Flutter that WebView is ready
+sendToFlutter({ type: 'ready' });
+
+</script>
+</body>
+</html>

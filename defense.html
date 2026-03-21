@@ -68,37 +68,13 @@
     .stat-chip.hp { color: #ef5350; }
     .stat-chip.stone { color: #ffd54f; }
 
-    /* Hex minimap */
-    .minimap-container {
-      position: relative;
-      width: 280px; height: 260px;
-      margin: 0 auto;
-    }
-    .hex-cell {
-      position: absolute;
-      width: 70px; height: 60px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 1.6em;
-      clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
-      cursor: pointer;
-      transition: filter 0.15s;
-    }
-    .hex-cell:active { filter: brightness(1.3); }
-    .hex-cell.grass { background: #4CAF50; }
-    .hex-cell.road { background: #8D6E63; }
-    .hex-cell.water { background: #2196F3; }
-    .hex-cell.rock { background: #757575; }
-    .hex-cell.magic { background: #7B1FA2; }
-    .hex-cell.empty { background: #2a2a3e; pointer-events: none; }
-    .hex-cell.highlight { box-shadow: inset 0 0 0 3px #ffd740; }
-
-    .hex-unit {
-      font-size: 1.3em;
-      pointer-events: none;
-    }
-    .hex-stone {
-      position: absolute; bottom: 4px; right: 4px;
-      font-size: 0.6em; color: #ffd740;
+    /* 3D canvas */
+    #defense-canvas {
+      width: 100%; max-width: 380px;
+      height: 260px;
+      border-radius: 12px;
+      background: #111;
+      touch-action: none;
     }
 
     /* Action buttons */
@@ -173,8 +149,8 @@
     <!-- Status Bar -->
     <div class="status-bar" id="status-bar"></div>
 
-    <!-- Minimap -->
-    <div class="minimap-container" id="minimap"></div>
+    <!-- 3D Canvas -->
+    <canvas id="defense-canvas"></canvas>
 
     <!-- Actions -->
     <div id="action-panel"></div>
@@ -199,7 +175,18 @@
   </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
 (function() {
   const SUPABASE_URL = 'https://eixvkfbdplxgpypxjtml.supabase.co';
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVpeHZrZmJkcGx4Z3B5cHhqdG1sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQzMjI5NjksImV4cCI6MjA3OTg5ODk2OX0.vmSeqMS6DQW_gFk9rIhq2lj_x9RTgncBFfhSb9_i0y8';
@@ -216,11 +203,254 @@
   let selectedSkill = null;
   let actionSent = false;
 
+  // Three.js state
+  let threeRenderer = null;
+  let threeScene = null;
+  let threeCamera = null;
+  let threeControls = null;
+  let tileMeshes = {};
+  let unitMeshes = {};
+  let raycaster = null;
+  let pointer = new THREE.Vector2();
+  let threeInited = false;
+
+  const SQRT3 = Math.sqrt(3);
+  const TILE_COLORS = {
+    grass:    0x4CAF50,
+    water:    0x2196F3,
+    mountain: 0x9E9E9E,
+    forest:   0x2E7D32,
+    sand:     0xFFEB3B,
+    village:  0xFF9800,
+  };
+  const TILE_HEIGHTS = {
+    grass: 0.0, water: -0.1, mountain: 0.5,
+    forest: 0.15, sand: 0.0, village: 0.1,
+  };
+
   const $ = id => document.getElementById(id);
 
   function showScreen(id) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     $(id).classList.add('active');
+  }
+
+  function hexToWorld(q, r) {
+    return { x: SQRT3 * q + SQRT3 / 2 * r, z: 1.5 * r };
+  }
+
+  // ===== Three.js =====
+
+  function initThree() {
+    if (threeInited) return;
+    threeInited = true;
+
+    const canvas = $('defense-canvas');
+    threeRenderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    threeRenderer.setPixelRatio(window.devicePixelRatio);
+    threeRenderer.setClearColor(0x111111);
+
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    threeRenderer.setSize(w, h, false);
+
+    threeScene = new THREE.Scene();
+    threeCamera = new THREE.PerspectiveCamera(50, w / h, 0.1, 100);
+    threeCamera.position.set(0, 8, 6);
+    threeCamera.lookAt(0, 0, 0);
+
+    threeControls = new OrbitControls(threeCamera, canvas);
+    threeControls.enableDamping = true;
+    threeControls.dampingFactor = 0.1;
+    threeControls.maxPolarAngle = Math.PI / 2.2;
+    threeControls.minDistance = 3;
+    threeControls.maxDistance = 20;
+
+    threeScene.add(new THREE.AmbientLight(0xffffff, 0.5));
+    const dl = new THREE.DirectionalLight(0xffffff, 0.7);
+    dl.position.set(-3, 8, 4);
+    threeScene.add(dl);
+
+    raycaster = new THREE.Raycaster();
+
+    // Click handler
+    canvas.addEventListener('click', onCanvasClick);
+
+    animate();
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+    if (threeControls) threeControls.update();
+    if (threeRenderer && threeScene && threeCamera) {
+      threeRenderer.render(threeScene, threeCamera);
+    }
+  }
+
+  function onCanvasClick(event) {
+    if (actionSent) return;
+    if (!selectedAction && !selectedSkill) return;
+
+    const canvas = $('defense-canvas');
+    const rect = canvas.getBoundingClientRect();
+    pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    raycaster.setFromCamera(pointer, threeCamera);
+    const meshes = Object.values(tileMeshes);
+    const hits = raycaster.intersectObjects(meshes);
+    if (hits.length > 0) {
+      const { q, r } = hits[0].object.userData;
+      if (q !== undefined) {
+        onHexClick(q, r);
+      }
+    }
+  }
+
+  function render3DView() {
+    if (!gameState || !threeScene) return;
+
+    const tiles = gameState.tiles || [];
+    const units = gameState.units || [];
+    const centerQ = gameState.centerQ || 0;
+    const centerR = gameState.centerR || 0;
+
+    // Clear old tiles
+    Object.values(tileMeshes).forEach(m => threeScene.remove(m));
+    tileMeshes = {};
+
+    // Clear old units
+    Object.values(unitMeshes).forEach(m => threeScene.remove(m));
+    unitMeshes = {};
+
+    const hexGeo = new THREE.CylinderGeometry(0.9, 0.9, 0.3, 6);
+
+    tiles.forEach(tile => {
+      const dq = tile.q - centerQ;
+      const dr = tile.r - centerR;
+      const color = TILE_COLORS[tile.type] || 0x888888;
+      const height = TILE_HEIGHTS[tile.type] || 0;
+      const mat = new THREE.MeshLambertMaterial({ color });
+      const mesh = new THREE.Mesh(hexGeo, mat);
+
+      const pos = hexToWorld(dq, dr);
+      if (tile.type === 'mountain') {
+        mesh.scale.set(1, 3, 1);
+        mesh.position.set(pos.x, height + 0.45, pos.z);
+      } else {
+        mesh.position.set(pos.x, height, pos.z);
+      }
+
+      mesh.userData = { q: tile.q, r: tile.r, type: tile.type };
+      threeScene.add(mesh);
+      tileMeshes[`${tile.q},${tile.r}`] = mesh;
+
+      // Stone markers
+      if (tile.stones > 0) {
+        for (let i = 0; i < tile.stones && i < 3; i++) {
+          const sg = new THREE.OctahedronGeometry(0.12);
+          const sm = new THREE.MeshLambertMaterial({ color: 0xffbf00 });
+          const smesh = new THREE.Mesh(sg, sm);
+          const angle = (i / Math.max(tile.stones, 1)) * Math.PI * 2;
+          smesh.position.set(
+            pos.x + Math.cos(angle) * 0.3,
+            0.3,
+            pos.z + Math.sin(angle) * 0.3
+          );
+          threeScene.add(smesh);
+          // Store for cleanup as pseudo-tile
+          tileMeshes[`stone_${tile.q}_${tile.r}_${i}`] = smesh;
+        }
+      }
+    });
+
+    // Magic circle marker (if center tile is visible)
+    const mcTile = tiles.find(t => t.q === 0 && t.r === 0);
+    if (mcTile) {
+      const mcDq = 0 - centerQ;
+      const mcDr = 0 - centerR;
+      const mcPos = hexToWorld(mcDq, mcDr);
+      const ringGeo = new THREE.RingGeometry(0.4, 0.6, 6);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: 0xce93d8, side: THREE.DoubleSide,
+        transparent: true, opacity: 0.6,
+      });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(mcPos.x, 0.16, mcPos.z);
+      threeScene.add(ring);
+      tileMeshes['magic_ring'] = ring;
+    }
+
+    // Units
+    units.forEach(u => {
+      if (u.hp <= 0 && u.type !== 'player') return;
+
+      const dq = u.q - centerQ;
+      const dr = u.r - centerR;
+      const pos = hexToWorld(dq, dr);
+      const tileH = TILE_HEIGHTS[tiles.find(t => t.q === u.q && t.r === u.r)?.type] || 0;
+      const baseY = Math.max(tileH, 0) + 0.15;
+
+      let radius, color;
+      if (u.type === 'player') {
+        radius = 0.25;
+        color = u.id === playerId ? 0x64B5F6 : 0x42A5F5;
+      } else if (u.type === 'skeleton') {
+        radius = 0.2; color = 0xEF5350;
+      } else {
+        radius = 0.35; color = 0x795548;
+      }
+
+      const geo = new THREE.SphereGeometry(radius, 12, 12);
+      const mat = new THREE.MeshLambertMaterial({
+        color,
+        opacity: u.hp > 0 ? 1.0 : 0.4,
+        transparent: u.hp <= 0,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(pos.x, baseY + radius, pos.z);
+      threeScene.add(mesh);
+      unitMeshes[u.id] = mesh;
+
+      // HP bar
+      if (u.hp > 0) {
+        const ratio = u.hp / u.maxHp;
+        const barW = 0.5;
+        const barH = 0.06;
+        const bgGeo = new THREE.PlaneGeometry(barW, barH);
+        const bgMat = new THREE.MeshBasicMaterial({ color: 0x333333, side: THREE.DoubleSide });
+        const bg = new THREE.Mesh(bgGeo, bgMat);
+        bg.position.set(pos.x, baseY + radius * 2 + 0.12, pos.z);
+        bg.lookAt(threeCamera.position);
+        threeScene.add(bg);
+        unitMeshes[u.id + '_hpbg'] = bg;
+
+        const fillGeo = new THREE.PlaneGeometry(barW * ratio, barH);
+        const fillColor = ratio > 0.5 ? 0x4caf50 : ratio > 0.25 ? 0xff9800 : 0xf44336;
+        const fillMat = new THREE.MeshBasicMaterial({ color: fillColor, side: THREE.DoubleSide });
+        const fill = new THREE.Mesh(fillGeo, fillMat);
+        fill.position.set(pos.x - (barW * (1 - ratio)) / 2, baseY + radius * 2 + 0.12, pos.z);
+        fill.lookAt(threeCamera.position);
+        threeScene.add(fill);
+        unitMeshes[u.id + '_hp'] = fill;
+      }
+
+      // Stone indicator
+      if (u.carryingStone) {
+        const sg = new THREE.OctahedronGeometry(0.1);
+        const sm = new THREE.MeshLambertMaterial({ color: 0xffbf00 });
+        const smesh = new THREE.Mesh(sg, sm);
+        smesh.position.set(pos.x + 0.25, baseY + radius * 2 + 0.2, pos.z);
+        threeScene.add(smesh);
+        unitMeshes[u.id + '_stone'] = smesh;
+      }
+    });
+
+    // Center camera on player view
+    threeCamera.position.set(0, 6, 5);
+    threeCamera.lookAt(0, 0, 0);
+    if (threeControls) threeControls.target.set(0, 0, 0);
   }
 
   // Init
@@ -294,7 +524,6 @@
   }
 
   function onDefenseState(payload) {
-    // Full state — only used if player view not received
     if (!gameState) {
       gameState = payload;
     }
@@ -309,8 +538,9 @@
       actionSent = false;
     }
 
+    initThree();
     renderStatusBar();
-    renderMinimap();
+    render3DView();
     renderActions();
     renderLog();
   }
@@ -338,9 +568,7 @@
     $('log-box').innerHTML = `<p>Wave ${payload.wave} 開始！目標: ${payload.quota}個</p>`;
   }
 
-  function onActionReceived(payload) {
-    // Optional: show progress
-  }
+  function onActionReceived(payload) {}
 
   function onGameOver(payload) {
     showScreen('result-screen');
@@ -362,86 +590,16 @@
     const s = gameState;
     const myUnit = s.myUnit;
     const hearts = myUnit
-      ? Array.from({length: myUnit.maxHp}, (_, i) => i < myUnit.hp ? '♥' : '♡').join('')
+      ? Array.from({length: myUnit.maxHp}, (_, i) => i < myUnit.hp ? '\u2665' : '\u2661').join('')
       : '---';
 
     $('status-bar').innerHTML = `
       <span class="stat-chip">W${s.wave || 1}/2</span>
       <span class="stat-chip">T${s.turn || 1}/${s.maxTurns || 8}</span>
       <span class="stat-chip hp">${hearts}</span>
-      <span class="stat-chip stone">◆${s.delivered || 0}/${s.quota || 3}</span>
+      <span class="stat-chip stone">\u25C6${s.delivered || 0}/${s.quota || 3}</span>
       <span class="stat-chip">${myUnit && myUnit.carryingStone ? '石:有' : '石:無'}</span>
     `;
-  }
-
-  function renderMinimap() {
-    if (!gameState) return;
-    const container = $('minimap');
-    container.innerHTML = '';
-
-    const tiles = gameState.tiles || [];
-    const units = gameState.units || [];
-    const centerQ = gameState.centerQ || 0;
-    const centerR = gameState.centerR || 0;
-
-    // Hex layout offsets for 7-cell minimap (pointy-top)
-    // Center + 6 neighbors in axial coords
-    const SQRT3 = Math.sqrt(3);
-    const hexW = 70;
-    const hexH = 60;
-    const size = hexW / SQRT3; // ~40
-
-    const containerW = 280;
-    const containerH = 260;
-    const midX = containerW / 2 - hexW / 2;
-    const midY = containerH / 2 - hexH / 2;
-
-    tiles.forEach(tile => {
-      const dq = tile.q - centerQ;
-      const dr = tile.r - centerR;
-
-      // Pixel position (pointy-top)
-      const px = midX + (SQRT3 * dq + SQRT3 / 2 * dr) * (hexW * 0.55);
-      const py = midY + (1.5 * dr) * (hexH * 0.55);
-
-      const cell = document.createElement('div');
-      cell.className = `hex-cell ${tile.type}`;
-      cell.style.left = px + 'px';
-      cell.style.top = py + 'px';
-      cell.dataset.q = tile.q;
-      cell.dataset.r = tile.r;
-
-      // Find unit on this tile
-      const unitHere = units.find(u => u.q === tile.q && u.r === tile.r && u.hp > 0);
-      if (unitHere) {
-        const span = document.createElement('span');
-        span.className = 'hex-unit';
-        span.textContent = unitEmoji(unitHere);
-        cell.appendChild(span);
-      } else if (tile.type === 'magic') {
-        cell.textContent = '🔮';
-      }
-
-      // Stone marker
-      if (tile.stones > 0) {
-        const stoneSpan = document.createElement('span');
-        stoneSpan.className = 'hex-stone';
-        stoneSpan.textContent = '◆' + tile.stones;
-        cell.appendChild(stoneSpan);
-      }
-
-      // Click handler for targeting
-      cell.addEventListener('click', () => onHexClick(tile.q, tile.r));
-
-      container.appendChild(cell);
-    });
-  }
-
-  function unitEmoji(unit) {
-    if (unit.type === 'player') return unit.id === playerId ? '😊' : '🤝';
-    if (unit.type === 'skeleton') return '💀';
-    if (unit.type === 'golem') return '🗿';
-    return '?';
   }
 
   function renderActions() {
@@ -500,7 +658,6 @@
           sendAction(action);
         } else {
           selectedAction = selectedAction === action ? null : action;
-          highlightTargets(action);
           renderActions();
         }
       });
@@ -513,7 +670,6 @@
         selectedAction = null;
         selectedSkill = selectedSkill === skill ? null : skill;
         renderActions();
-        renderMinimap(); // Update highlights
       });
     });
   }
@@ -526,34 +682,6 @@
   function skillName(type) {
     const map = { charge: '突撃', longPass: '遠投', heal: '回復', taunt: '挑発' };
     return map[type] || type;
-  }
-
-  function highlightTargets(action) {
-    // Add highlight class to valid target hexes
-    document.querySelectorAll('.hex-cell').forEach(cell => {
-      cell.classList.remove('highlight');
-    });
-
-    if (!selectedAction) return;
-
-    const myUnit = gameState?.myUnit;
-    if (!myUnit) return;
-    const myQ = myUnit.q;
-    const myR = myUnit.r;
-
-    document.querySelectorAll('.hex-cell').forEach(cell => {
-      const q = parseInt(cell.dataset.q);
-      const r = parseInt(cell.dataset.r);
-      const dist = hexDist(myQ, myR, q, r);
-
-      if (action === 'move' && dist >= 1 && dist <= myUnit.moveRange) {
-        cell.classList.add('highlight');
-      } else if (action === 'attack' && dist === 1) {
-        cell.classList.add('highlight');
-      } else if (action === 'rescue' && dist === 1) {
-        cell.classList.add('highlight');
-      }
-    });
   }
 
   function hexDist(q1, r1, q2, r2) {
@@ -596,7 +724,6 @@
     selectedAction = null;
     selectedSkill = null;
     renderActions();
-    document.querySelectorAll('.hex-cell').forEach(c => c.classList.remove('highlight'));
   }
 
   function renderLog() {
