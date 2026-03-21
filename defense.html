@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>魔石防衛隊</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      overflow-x: hidden;
+    }
+
+    .screen { display: none; width: 100%; max-width: 380px; text-align: center; }
+    .screen.active { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+
+    h1 { font-size: 1.6em; margin-bottom: 4px; }
+    h2 { font-size: 1.2em; color: #aaa; }
+
+    .emoji-large { font-size: 3.5em; }
+
+    input[type="text"] {
+      width: 100%; max-width: 280px;
+      padding: 12px 16px; font-size: 1em;
+      border: 2px solid #444; border-radius: 12px;
+      background: #16213e; color: #eee;
+      outline: none; text-align: center;
+    }
+    input[type="text"]:focus { border-color: #9c27b0; }
+
+    .btn {
+      padding: 12px 28px; font-size: 1em; font-weight: bold;
+      border: none; border-radius: 12px; cursor: pointer;
+      transition: transform 0.1s, opacity 0.2s; color: #fff;
+    }
+    .btn:active { transform: scale(0.95); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-primary { background: #9c27b0; }
+
+    .room-code {
+      background: #9c27b0; padding: 6px 16px; border-radius: 8px;
+      font-size: 1.3em; font-weight: bold; letter-spacing: 3px;
+    }
+
+    .player-list { width: 100%; list-style: none; text-align: left; }
+    .player-list li {
+      padding: 8px 12px; background: #16213e; border-radius: 8px; margin-bottom: 4px;
+    }
+
+    /* Status bar */
+    .status-bar {
+      display: flex; gap: 8px; justify-content: center;
+      flex-wrap: wrap; width: 100%;
+    }
+    .stat-chip {
+      background: #16213e; padding: 4px 10px; border-radius: 8px;
+      font-size: 0.85em; color: #ccc;
+    }
+    .stat-chip.hp { color: #ef5350; }
+    .stat-chip.stone { color: #ffd54f; }
+
+    /* Hex minimap */
+    .minimap-container {
+      position: relative;
+      width: 280px; height: 260px;
+      margin: 0 auto;
+    }
+    .hex-cell {
+      position: absolute;
+      width: 70px; height: 60px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.6em;
+      clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+      cursor: pointer;
+      transition: filter 0.15s;
+    }
+    .hex-cell:active { filter: brightness(1.3); }
+    .hex-cell.grass { background: #4CAF50; }
+    .hex-cell.road { background: #8D6E63; }
+    .hex-cell.water { background: #2196F3; }
+    .hex-cell.rock { background: #757575; }
+    .hex-cell.magic { background: #7B1FA2; }
+    .hex-cell.empty { background: #2a2a3e; pointer-events: none; }
+    .hex-cell.highlight { box-shadow: inset 0 0 0 3px #ffd740; }
+
+    .hex-unit {
+      font-size: 1.3em;
+      pointer-events: none;
+    }
+    .hex-stone {
+      position: absolute; bottom: 4px; right: 4px;
+      font-size: 0.6em; color: #ffd740;
+    }
+
+    /* Action buttons */
+    .action-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr);
+      gap: 6px; width: 100%;
+    }
+    .action-btn {
+      padding: 10px 4px; font-size: 0.85em; font-weight: bold;
+      border: 2px solid #444; border-radius: 10px;
+      background: #16213e; color: #eee; cursor: pointer;
+      transition: all 0.15s;
+    }
+    .action-btn:active { transform: scale(0.95); }
+    .action-btn.selected { border-color: #ffd740; background: #2a2a4e; }
+    .action-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    .skill-row {
+      display: flex; gap: 6px; justify-content: center; width: 100%;
+    }
+    .skill-btn {
+      flex: 1; padding: 8px 4px; font-size: 0.8em; font-weight: bold;
+      border: 2px solid #7B1FA2; border-radius: 10px;
+      background: rgba(123,31,162,0.2); color: #CE93D8; cursor: pointer;
+    }
+    .skill-btn:active { transform: scale(0.95); }
+    .skill-btn.used { opacity: 0.3; pointer-events: none; }
+    .skill-btn.selected { border-color: #ffd740; background: rgba(123,31,162,0.4); }
+
+    .waiting-msg {
+      color: #888; font-size: 0.95em; padding: 8px;
+    }
+
+    .log-box {
+      width: 100%; max-height: 60px; overflow-y: auto;
+      background: #111; border-radius: 8px; padding: 6px 10px;
+      font-size: 0.75em; color: #888; text-align: left;
+    }
+    .log-box p { margin: 2px 0; }
+    .log-box p:first-child { color: #ccc; }
+
+    /* Result */
+    .result-stat {
+      display: flex; justify-content: space-between;
+      padding: 6px 0; border-bottom: 1px solid #2a2a4e;
+    }
+    .result-stat:last-child { border-bottom: none; }
+  </style>
+</head>
+<body>
+
+  <!-- Join Screen -->
+  <div id="join-screen" class="screen active">
+    <div class="emoji-large">🔮</div>
+    <h1>魔石防衛隊</h1>
+    <div class="room-code" id="room-code-display">---</div>
+    <input type="text" id="nickname" placeholder="ニックネームを入力" maxlength="10" autocomplete="off">
+    <button class="btn btn-primary" id="join-btn" disabled>参加する</button>
+  </div>
+
+  <!-- Waiting Screen -->
+  <div id="waiting-screen" class="screen">
+    <div class="emoji-large">⏳</div>
+    <h2>ホストの開始を待っています...</h2>
+    <div style="color:#888; font-size:0.9em;" id="waiting-status">接続中...</div>
+    <h3 style="align-self: flex-start;">参加者</h3>
+    <ul class="player-list" id="player-list"></ul>
+  </div>
+
+  <!-- Game Screen -->
+  <div id="game-screen" class="screen">
+    <!-- Status Bar -->
+    <div class="status-bar" id="status-bar"></div>
+
+    <!-- Minimap -->
+    <div class="minimap-container" id="minimap"></div>
+
+    <!-- Actions -->
+    <div id="action-panel"></div>
+
+    <!-- Log -->
+    <div class="log-box" id="log-box"></div>
+  </div>
+
+  <!-- Result Screen -->
+  <div id="result-screen" class="screen">
+    <div class="emoji-large" id="result-emoji">🎉</div>
+    <h1 id="result-title">勝利！</h1>
+    <p style="color:#aaa;" id="result-subtitle"></p>
+    <div style="width:100%; background:#16213e; border-radius:12px; padding:16px;" id="result-stats"></div>
+  </div>
+
+  <!-- Closed Screen -->
+  <div id="closed-screen" class="screen">
+    <div class="emoji-large">👋</div>
+    <h1>部屋が閉じられました</h1>
+    <p style="color:#888;">ありがとうございました！</p>
+  </div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+(function() {
+  const SUPABASE_URL = 'https://eixvkfbdplxgpypxjtml.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVpeHZrZmJkcGx4Z3B5cHhqdG1sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQzMjI5NjksImV4cCI6MjA3OTg5ODk2OX0.vmSeqMS6DQW_gFk9rIhq2lj_x9RTgncBFfhSb9_i0y8';
+
+  const params = new URLSearchParams(window.location.search);
+  const roomId = params.get('room');
+  const playerId = crypto.randomUUID();
+  let channel = null;
+  let myName = '';
+
+  // Game state
+  let gameState = null;
+  let selectedAction = null;
+  let selectedSkill = null;
+  let actionSent = false;
+
+  const $ = id => document.getElementById(id);
+
+  function showScreen(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    $(id).classList.add('active');
+  }
+
+  // Init
+  if (!roomId) {
+    $('room-code-display').textContent = 'エラー';
+    $('join-btn').disabled = true;
+    return;
+  }
+  $('room-code-display').textContent = roomId;
+
+  const nicknameInput = $('nickname');
+  const joinBtn = $('join-btn');
+  nicknameInput.addEventListener('input', () => {
+    joinBtn.disabled = !nicknameInput.value.trim();
+  });
+
+  // Join
+  joinBtn.addEventListener('click', async () => {
+    myName = nicknameInput.value.trim();
+    if (!myName) return;
+    joinBtn.disabled = true;
+    joinBtn.textContent = '接続中...';
+
+    try {
+      const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      channel = sb.channel(`room-${roomId}`, { config: { broadcast: { self: true } } });
+
+      const unwrap = (msg) => msg?.payload ?? msg;
+
+      channel.on('broadcast', { event: 'players' }, (msg) => onPlayers(unwrap(msg)));
+      channel.on('broadcast', { event: 'room_closed' }, () => onRoomClosed());
+      channel.on('broadcast', { event: 'defense_state' }, (msg) => onDefenseState(unwrap(msg)));
+      channel.on('broadcast', { event: 'defense_player_view' }, (msg) => onPlayerView(unwrap(msg)));
+      channel.on('broadcast', { event: 'defense_resolve_log' }, (msg) => onResolveLog(unwrap(msg)));
+      channel.on('broadcast', { event: 'defense_wave_start' }, (msg) => onWaveStart(unwrap(msg)));
+      channel.on('broadcast', { event: 'defense_game_over' }, (msg) => onGameOver(unwrap(msg)));
+      channel.on('broadcast', { event: 'defense_action_received' }, (msg) => onActionReceived(unwrap(msg)));
+
+      await channel.subscribe();
+
+      await channel.send({
+        type: 'broadcast', event: 'join',
+        payload: { playerId, name: myName }
+      });
+
+      showScreen('waiting-screen');
+      $('waiting-status').textContent = '接続完了！';
+    } catch (e) {
+      joinBtn.disabled = false;
+      joinBtn.textContent = '参加する';
+      alert('接続エラー: ' + e.message);
+    }
+  });
+
+  // ===== Event Handlers =====
+
+  function onPlayers(payload) {
+    const players = payload.players || [];
+    const list = $('player-list');
+    list.innerHTML = '';
+    players.forEach((p, i) => {
+      const li = document.createElement('li');
+      li.textContent = `${i + 1}. ${p.name}`;
+      list.appendChild(li);
+    });
+  }
+
+  function onRoomClosed() {
+    showScreen('closed-screen');
+    if (channel) { channel.unsubscribe(); channel = null; }
+  }
+
+  function onDefenseState(payload) {
+    // Full state — only used if player view not received
+    if (!gameState) {
+      gameState = payload;
+    }
+  }
+
+  function onPlayerView(payload) {
+    if (payload.playerId !== playerId) return;
+    gameState = payload;
+    showScreen('game-screen');
+
+    if (payload.phase === 'actionInput') {
+      actionSent = false;
+    }
+
+    renderStatusBar();
+    renderMinimap();
+    renderActions();
+    renderLog();
+  }
+
+  function onResolveLog(payload) {
+    const events = payload.events || [];
+    const logBox = $('log-box');
+    events.forEach(ev => {
+      const p = document.createElement('p');
+      p.textContent = ev.description || '';
+      logBox.prepend(p);
+    });
+  }
+
+  function onWaveStart(payload) {
+    if (gameState) {
+      gameState.wave = payload.wave;
+      gameState.quota = payload.quota;
+      gameState.maxTurns = payload.maxTurns;
+      if (payload.skills && payload.skills[playerId]) {
+        gameState.skills = payload.skills[playerId];
+      }
+    }
+    actionSent = false;
+    $('log-box').innerHTML = `<p>Wave ${payload.wave} 開始！目標: ${payload.quota}個</p>`;
+  }
+
+  function onActionReceived(payload) {
+    // Optional: show progress
+  }
+
+  function onGameOver(payload) {
+    showScreen('result-screen');
+    const victory = payload.victory;
+    $('result-emoji').textContent = victory ? '🎉' : '💀';
+    $('result-title').textContent = victory ? '勝利！' : '敗北...';
+    $('result-subtitle').textContent = victory ? '全Waveを突破した！' : '魔石を守りきれなかった...';
+    $('result-stats').innerHTML = `
+      <div class="result-stat"><span>Wave到達</span><span>${payload.waves}/2</span></div>
+      <div class="result-stat"><span>魔石納品</span><span>${payload.delivered}個</span></div>
+      <div class="result-stat"><span>使用ターン</span><span>${payload.turnsUsed}</span></div>
+    `;
+  }
+
+  // ===== Rendering =====
+
+  function renderStatusBar() {
+    if (!gameState) return;
+    const s = gameState;
+    const myUnit = s.myUnit;
+    const hearts = myUnit
+      ? Array.from({length: myUnit.maxHp}, (_, i) => i < myUnit.hp ? '♥' : '♡').join('')
+      : '---';
+
+    $('status-bar').innerHTML = `
+      <span class="stat-chip">W${s.wave || 1}/2</span>
+      <span class="stat-chip">T${s.turn || 1}/${s.maxTurns || 8}</span>
+      <span class="stat-chip hp">${hearts}</span>
+      <span class="stat-chip stone">◆${s.delivered || 0}/${s.quota || 3}</span>
+      <span class="stat-chip">${myUnit && myUnit.carryingStone ? '石:有' : '石:無'}</span>
+    `;
+  }
+
+  function renderMinimap() {
+    if (!gameState) return;
+    const container = $('minimap');
+    container.innerHTML = '';
+
+    const tiles = gameState.tiles || [];
+    const units = gameState.units || [];
+    const centerQ = gameState.centerQ || 0;
+    const centerR = gameState.centerR || 0;
+
+    // Hex layout offsets for 7-cell minimap (pointy-top)
+    // Center + 6 neighbors in axial coords
+    const SQRT3 = Math.sqrt(3);
+    const hexW = 70;
+    const hexH = 60;
+    const size = hexW / SQRT3; // ~40
+
+    const containerW = 280;
+    const containerH = 260;
+    const midX = containerW / 2 - hexW / 2;
+    const midY = containerH / 2 - hexH / 2;
+
+    tiles.forEach(tile => {
+      const dq = tile.q - centerQ;
+      const dr = tile.r - centerR;
+
+      // Pixel position (pointy-top)
+      const px = midX + (SQRT3 * dq + SQRT3 / 2 * dr) * (hexW * 0.55);
+      const py = midY + (1.5 * dr) * (hexH * 0.55);
+
+      const cell = document.createElement('div');
+      cell.className = `hex-cell ${tile.type}`;
+      cell.style.left = px + 'px';
+      cell.style.top = py + 'px';
+      cell.dataset.q = tile.q;
+      cell.dataset.r = tile.r;
+
+      // Find unit on this tile
+      const unitHere = units.find(u => u.q === tile.q && u.r === tile.r && u.hp > 0);
+      if (unitHere) {
+        const span = document.createElement('span');
+        span.className = 'hex-unit';
+        span.textContent = unitEmoji(unitHere);
+        cell.appendChild(span);
+      } else if (tile.type === 'magic') {
+        cell.textContent = '🔮';
+      }
+
+      // Stone marker
+      if (tile.stones > 0) {
+        const stoneSpan = document.createElement('span');
+        stoneSpan.className = 'hex-stone';
+        stoneSpan.textContent = '◆' + tile.stones;
+        cell.appendChild(stoneSpan);
+      }
+
+      // Click handler for targeting
+      cell.addEventListener('click', () => onHexClick(tile.q, tile.r));
+
+      container.appendChild(cell);
+    });
+  }
+
+  function unitEmoji(unit) {
+    if (unit.type === 'player') return unit.id === playerId ? '😊' : '🤝';
+    if (unit.type === 'skeleton') return '💀';
+    if (unit.type === 'golem') return '🗿';
+    return '?';
+  }
+
+  function renderActions() {
+    if (!gameState) return;
+    const panel = $('action-panel');
+    const phase = gameState.phase;
+
+    if (phase !== 'actionInput' || actionSent) {
+      panel.innerHTML = `<p class="waiting-msg">${actionSent ? 'アクション送信済み 待機中...' : phase === 'resolving' ? '解決中...' : phase === 'enemyTurn' ? '敵ターン...' : '待機中...'}</p>`;
+      return;
+    }
+
+    const myUnit = gameState.myUnit;
+    if (!myUnit || myUnit.hp <= 0) {
+      panel.innerHTML = '<p class="waiting-msg">ダウン中... 仲間の救出を待っています</p>';
+      return;
+    }
+
+    const actions = [
+      { id: 'move', label: '🚶移動', needsTarget: true },
+      { id: 'attack', label: '⚔攻撃', needsTarget: true },
+      { id: 'pickup', label: '⬇拾う', needsTarget: false },
+      { id: 'deliver', label: '⬆納品', needsTarget: false },
+      { id: 'rescue', label: '💚救出', needsTarget: true },
+      { id: 'wait', label: '⏳待機', needsTarget: false },
+    ];
+
+    let html = '<div class="action-grid">';
+    actions.forEach(a => {
+      const sel = selectedAction === a.id ? ' selected' : '';
+      html += `<button class="action-btn${sel}" data-action="${a.id}" data-needs-target="${a.needsTarget}">${a.label}</button>`;
+    });
+    html += '</div>';
+
+    // Skills
+    const skills = gameState.skills || [];
+    if (skills.length > 0) {
+      html += '<div class="skill-row" style="margin-top:6px;">';
+      skills.forEach(s => {
+        const cls = s.used ? ' used' : (selectedSkill === s.type ? ' selected' : '');
+        html += `<button class="skill-btn${cls}" data-skill="${s.type}">${skillEmoji(s.type)}${skillName(s.type)}</button>`;
+      });
+      html += '</div>';
+    }
+
+    panel.innerHTML = html;
+
+    // Bind action buttons
+    panel.querySelectorAll('.action-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const action = btn.dataset.action;
+        const needsTarget = btn.dataset.needsTarget === 'true';
+        selectedSkill = null;
+
+        if (!needsTarget) {
+          sendAction(action);
+        } else {
+          selectedAction = selectedAction === action ? null : action;
+          highlightTargets(action);
+          renderActions();
+        }
+      });
+    });
+
+    // Bind skill buttons
+    panel.querySelectorAll('.skill-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const skill = btn.dataset.skill;
+        selectedAction = null;
+        selectedSkill = selectedSkill === skill ? null : skill;
+        renderActions();
+        renderMinimap(); // Update highlights
+      });
+    });
+  }
+
+  function skillEmoji(type) {
+    const map = { charge: '⚔', longPass: '🎯', heal: '💚', taunt: '😤' };
+    return map[type] || '✨';
+  }
+
+  function skillName(type) {
+    const map = { charge: '突撃', longPass: '遠投', heal: '回復', taunt: '挑発' };
+    return map[type] || type;
+  }
+
+  function highlightTargets(action) {
+    // Add highlight class to valid target hexes
+    document.querySelectorAll('.hex-cell').forEach(cell => {
+      cell.classList.remove('highlight');
+    });
+
+    if (!selectedAction) return;
+
+    const myUnit = gameState?.myUnit;
+    if (!myUnit) return;
+    const myQ = myUnit.q;
+    const myR = myUnit.r;
+
+    document.querySelectorAll('.hex-cell').forEach(cell => {
+      const q = parseInt(cell.dataset.q);
+      const r = parseInt(cell.dataset.r);
+      const dist = hexDist(myQ, myR, q, r);
+
+      if (action === 'move' && dist >= 1 && dist <= myUnit.moveRange) {
+        cell.classList.add('highlight');
+      } else if (action === 'attack' && dist === 1) {
+        cell.classList.add('highlight');
+      } else if (action === 'rescue' && dist === 1) {
+        cell.classList.add('highlight');
+      }
+    });
+  }
+
+  function hexDist(q1, r1, q2, r2) {
+    return (Math.abs(q1 - q2) + Math.abs(r1 - r2) + Math.abs((-q1 - r1) - (-q2 - r2))) / 2;
+  }
+
+  function onHexClick(q, r) {
+    if (actionSent) return;
+
+    if (selectedAction) {
+      sendAction(selectedAction, q, r);
+    } else if (selectedSkill) {
+      sendAction('skill', q, r, selectedSkill);
+    }
+  }
+
+  function sendAction(action, targetQ, targetR, skill) {
+    if (!channel || actionSent) return;
+
+    const payload = {
+      playerId,
+      gameId: 'defense',
+      data: { action }
+    };
+    if (targetQ != null) {
+      payload.data.targetQ = targetQ;
+      payload.data.targetR = targetR;
+    }
+    if (skill) {
+      payload.data.skill = skill;
+    }
+
+    channel.send({
+      type: 'broadcast',
+      event: 'game_input',
+      payload
+    });
+
+    actionSent = true;
+    selectedAction = null;
+    selectedSkill = null;
+    renderActions();
+    document.querySelectorAll('.hex-cell').forEach(c => c.classList.remove('highlight'));
+  }
+
+  function renderLog() {
+    if (!gameState) return;
+    const logBox = $('log-box');
+    const logs = gameState.log || [];
+    logBox.innerHTML = '';
+    logs.forEach(msg => {
+      const p = document.createElement('p');
+      p.textContent = msg;
+      logBox.appendChild(p);
+    });
+  }
+
+})();
+</script>
+</body>
+</html>

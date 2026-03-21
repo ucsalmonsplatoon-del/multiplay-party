@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>じゃんけんバトル</title>
+  <title>パーティゲーム</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -149,14 +149,67 @@
     .rank-num { font-size: 1.8em; min-width: 40px; }
     .rank-name { flex: 1; font-size: 1.1em; }
     .rank-wins { font-weight: bold; font-size: 1.1em; }
+
+    /* World mode styles */
+    #world-screen { position: relative; max-width: 100%; width: 100vw; height: 100dvh; padding: 0; }
+    #world-screen.active { padding: 0; justify-content: flex-start; }
+    #world-canvas { width: 100%; height: 100%; display: block; }
+    #world-ui {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: center;
+      z-index: 10;
+    }
+    #world-status {
+      position: absolute;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.7);
+      padding: 8px 20px;
+      border-radius: 12px;
+      font-size: 1em;
+      z-index: 10;
+      white-space: nowrap;
+    }
+    .move-btn {
+      width: 56px;
+      height: 48px;
+      font-size: 1.4em;
+      border: 2px solid #6c63ff;
+      border-radius: 12px;
+      background: rgba(108,99,255,0.3);
+      color: #fff;
+      cursor: pointer;
+    }
+    .move-btn:active { transform: scale(0.9); background: rgba(108,99,255,0.6); }
+
+    /* Minigame overlay */
+    #minigame-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.9);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      z-index: 100;
+    }
+    #minigame-overlay.active { display: flex; }
   </style>
 </head>
 <body>
 
   <!-- 参加画面 -->
   <div id="join-screen" class="screen active">
-    <div class="emoji-large">✊✌️✋</div>
-    <h1>じゃんけんバトル</h1>
+    <div class="emoji-large">🎮</div>
+    <h1>パーティゲーム</h1>
     <div class="room-code" id="room-code-display">---</div>
     <input type="text" id="nickname" placeholder="ニックネームを入力" maxlength="10" autocomplete="off">
     <button class="btn btn-primary" id="join-btn" disabled>参加する</button>
@@ -170,7 +223,7 @@
     <ul class="player-list" id="player-list"></ul>
   </div>
 
-  <!-- ゲーム画面 -->
+  <!-- ゲーム画面 (じゃんけん) -->
   <div id="game-screen" class="screen">
     <h2 id="round-label">Round 1 / 3</h2>
     <div id="game-status"></div>
@@ -203,11 +256,35 @@
     <p class="status">ありがとうございました！</p>
   </div>
 
+  <!-- ワールド画面 (Three.js 3D) -->
+  <div id="world-screen" class="screen">
+    <canvas id="world-canvas"></canvas>
+    <div id="world-status">マップ読込中...</div>
+    <div id="world-ui"></div>
+  </div>
+
+  <!-- ミニゲームオーバーレイ -->
+  <div id="minigame-overlay">
+    <div class="emoji-large" id="minigame-emoji">✊</div>
+    <h1 id="minigame-title">ミニゲーム</h1>
+    <div id="minigame-content"></div>
+  </div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
 (function() {
   // ===== 設定 =====
-  // TODO: Supabase プロジェクトの値に置き換えてください
   const SUPABASE_URL = 'https://eixvkfbdplxgpypxjtml.supabase.co';
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVpeHZrZmJkcGx4Z3B5cHhqdG1sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQzMjI5NjksImV4cCI6MjA3OTg5ODk2OX0.vmSeqMS6DQW_gFk9rIhq2lj_x9RTgncBFfhSb9_i0y8';
 
@@ -219,6 +296,17 @@
   let myName = '';
   let handSent = false;
 
+  // World state
+  let worldData = null;
+  let validMoves = [];
+  let isMyTurn = false;
+  let threeScene = null;
+  let threeRenderer = null;
+  let threeCamera = null;
+  let threeControls = null;
+  let playerMeshes = {};
+  let tileMeshes = {};
+
   // ===== DOM =====
   const $ = id => document.getElementById(id);
 
@@ -226,6 +314,9 @@
   function showScreen(id) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     $(id).classList.add('active');
+    if (id === 'world-screen' && threeRenderer) {
+      onWindowResize();
+    }
   }
 
   // ===== 初期化 =====
@@ -257,16 +348,23 @@
 
       channel = supabase.channel(`room-${roomId}`, { config: { broadcast: { self: true } } });
 
-      // イベントリスナー登録
-      // supabase-js v2 のコールバック引数はメッセージ全体が来る場合とpayloadだけの場合がある
       const unwrap = (msg) => msg?.payload ?? msg;
 
-      channel.on('broadcast', { event: 'players' }, (msg) => { console.log('players', msg); onPlayers(unwrap(msg)); });
-      channel.on('broadcast', { event: 'round_start' }, (msg) => { console.log('round_start', msg); onRoundStart(unwrap(msg)); });
-      channel.on('broadcast', { event: 'countdown' }, (msg) => { console.log('countdown', msg); onCountdown(unwrap(msg)); });
-      channel.on('broadcast', { event: 'round_result' }, (msg) => { console.log('round_result', msg); onRoundResult(unwrap(msg)); });
-      channel.on('broadcast', { event: 'game_result' }, (msg) => { console.log('game_result', msg); onGameResult(unwrap(msg)); });
-      channel.on('broadcast', { event: 'room_closed' }, (msg) => { console.log('room_closed', msg); onRoomClosed(); });
+      // Existing events
+      channel.on('broadcast', { event: 'players' }, (msg) => { onPlayers(unwrap(msg)); });
+      channel.on('broadcast', { event: 'round_start' }, (msg) => { onRoundStart(unwrap(msg)); });
+      channel.on('broadcast', { event: 'countdown' }, (msg) => { onCountdown(unwrap(msg)); });
+      channel.on('broadcast', { event: 'round_result' }, (msg) => { onRoundResult(unwrap(msg)); });
+      channel.on('broadcast', { event: 'game_result' }, (msg) => { onGameResult(unwrap(msg)); });
+      channel.on('broadcast', { event: 'room_closed' }, (msg) => { onRoomClosed(); });
+
+      // World mode events
+      channel.on('broadcast', { event: 'phase' }, (msg) => { onPhase(unwrap(msg)); });
+      channel.on('broadcast', { event: 'world_ready' }, (msg) => { onWorldReady(unwrap(msg)); });
+      channel.on('broadcast', { event: 'turn_prompt' }, (msg) => { onTurnPrompt(unwrap(msg)); });
+      channel.on('broadcast', { event: 'player_moved' }, (msg) => { onPlayerMoved(unwrap(msg)); });
+      channel.on('broadcast', { event: 'minigame_start' }, (msg) => { onMinigameStart(unwrap(msg)); });
+      channel.on('broadcast', { event: 'minigame_end' }, (msg) => { onMinigameEnd(unwrap(msg)); });
 
       await channel.subscribe();
 
@@ -286,7 +384,7 @@
     }
   });
 
-  // ===== イベントハンドラ =====
+  // ===== Janken Event Handlers (existing) =====
 
   function onPlayers(payload) {
     const players = payload.players || [];
@@ -294,9 +392,14 @@
     list.innerHTML = '';
     players.forEach((p, i) => {
       const li = document.createElement('li');
-      li.textContent = `${i + 1}. ${p.name}`;
+      li.textContent = `${i + 1}. ${p.name}${p.score != null ? ` (${p.score}pt)` : ''}`;
       list.appendChild(li);
     });
+
+    // Update player meshes in 3D if world is active
+    if (worldData && threeScene) {
+      updatePlayerMeshes(players);
+    }
   }
 
   function onRoundStart(payload) {
@@ -309,7 +412,6 @@
     $('hand-status').style.display = 'none';
     $('round-result').style.display = 'none';
 
-    // 手ボタンのリセット
     document.querySelectorAll('.hand-btn').forEach(b => {
       b.classList.remove('selected');
       b.disabled = false;
@@ -324,8 +426,6 @@
       display.textContent = '出して！';
       display.style.display = 'block';
       $('game-status').textContent = '';
-
-      // 手選択ボタンを表示
       setTimeout(() => {
         display.style.display = 'none';
         $('hand-buttons').style.display = 'flex';
@@ -333,9 +433,8 @@
     } else {
       display.textContent = count;
       display.style.display = 'block';
-      // re-trigger animation
       display.style.animation = 'none';
-      display.offsetHeight; // reflow
+      display.offsetHeight;
       display.style.animation = '';
     }
   }
@@ -358,11 +457,9 @@
     $('result-title').textContent = isDraw ? 'あいこ！🔄' : '結果発表！';
     $('result-title').style.color = isDraw ? '#ffd700' : '#6c63ff';
 
-    // 結果一覧を表示（簡易: playerIdだけなので名前の解決は限定的）
     const handsDiv = $('result-hands');
     handsDiv.innerHTML = '';
 
-    // 自分の結果を強調
     const myHand = hands[playerId];
     const iWon = winners.includes(playerId);
 
@@ -406,7 +503,7 @@
     }
   }
 
-  // ===== 手の選択 =====
+  // ===== 手の選択 (じゃんけん) =====
   document.querySelectorAll('.hand-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       if (handSent) return;
@@ -414,11 +511,8 @@
 
       const hand = btn.dataset.hand;
       btn.classList.add('selected');
-
-      // 全ボタン無効化
       document.querySelectorAll('.hand-btn').forEach(b => b.disabled = true);
 
-      // 送信
       channel.send({
         type: 'broadcast',
         event: 'hand',
@@ -430,6 +524,273 @@
       $('hand-status').textContent = '送信済み！他の人を待っています...';
     });
   });
+
+  // ===== World Mode Event Handlers =====
+
+  function onPhase(payload) {
+    const phase = payload.phase;
+    if (phase === 'generating' || phase === 'exploring' || phase === 'minigame_select') {
+      if (!threeScene) {
+        initThreeScene();
+      }
+      showScreen('world-screen');
+      $('world-status').textContent =
+        phase === 'generating' ? 'マップ生成中...' :
+        phase === 'exploring' ? '探索中' :
+        'ミニゲーム準備中...';
+    }
+  }
+
+  function onWorldReady(payload) {
+    worldData = payload;
+    if (!threeScene) initThreeScene();
+    buildHexWorld(payload);
+    showScreen('world-screen');
+    $('world-status').textContent = 'ワールド準備完了！';
+  }
+
+  function onTurnPrompt(payload) {
+    const turnPlayerId = payload.playerId;
+    validMoves = payload.validMoves || [];
+
+    // Empty playerId = clear signal (turn transitioning)
+    if (!turnPlayerId) {
+      isMyTurn = false;
+      $('world-ui').innerHTML = '';
+      $('world-status').textContent = '待機中...';
+      return;
+    }
+
+    isMyTurn = (turnPlayerId === playerId);
+
+    if (isMyTurn) {
+      $('world-status').textContent = 'あなたのターン！移動先を選んでください';
+      showMoveButtons(validMoves);
+    } else {
+      $('world-status').textContent = '他のプレイヤーのターン...';
+      $('world-ui').innerHTML = '';
+    }
+  }
+
+  function onPlayerMoved(payload) {
+    const { playerId: movedId, toQ, toR } = payload;
+    if (playerMeshes[movedId]) {
+      const pos = hexToWorld(toQ, toR);
+      playerMeshes[movedId].position.set(pos.x, 0.5, pos.z);
+    }
+  }
+
+  function onMinigameStart(payload) {
+    const gameId = payload.gameId;
+    const overlay = $('minigame-overlay');
+    overlay.classList.add('active');
+
+    if (gameId === 'janken') {
+      $('minigame-emoji').textContent = '✊';
+      $('minigame-title').textContent = 'じゃんけん！';
+      $('minigame-content').innerHTML = '<p style="color:#aaa;">ホストがラウンドを開始します...</p>';
+    } else {
+      $('minigame-emoji').textContent = '🎮';
+      $('minigame-title').textContent = 'ミニゲーム';
+      $('minigame-content').innerHTML = '';
+    }
+  }
+
+  function onMinigameEnd(payload) {
+    const overlay = $('minigame-overlay');
+    const scores = payload.scores || {};
+    const myScore = scores[playerId] || 0;
+
+    $('minigame-content').innerHTML = `
+      <p style="font-size:2em;">${myScore > 0 ? '🎉 +' + myScore + 'pt！' : '😢 0pt'}</p>
+    `;
+
+    setTimeout(() => {
+      overlay.classList.remove('active');
+    }, 2000);
+  }
+
+  // ===== Three.js 3D World =====
+
+  const TILE_COLORS = {
+    grass:    0x4CAF50,
+    water:    0x2196F3,
+    mountain: 0x9E9E9E,
+    forest:   0x2E7D32,
+    sand:     0xFFEB3B,
+    village:  0xFF9800,
+  };
+
+  const TILE_HEIGHTS = {
+    grass: 0.0,
+    water: -0.1,
+    mountain: 0.5,
+    forest: 0.15,
+    sand: 0.0,
+    village: 0.1,
+  };
+
+  const SQRT3 = Math.sqrt(3);
+
+  function hexToWorld(q, r, size = 1.0) {
+    const x = size * (SQRT3 * q + SQRT3 / 2 * r);
+    const z = size * (1.5 * r);
+    return { x, z };
+  }
+
+  function initThreeScene() {
+    const canvas = $('world-canvas');
+    threeRenderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    threeRenderer.setPixelRatio(window.devicePixelRatio);
+    threeRenderer.setClearColor(0x1a1a2e);
+
+    threeScene = new THREE.Scene();
+
+    threeCamera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 200);
+    threeCamera.position.set(0, 15, 12);
+    threeCamera.lookAt(0, 0, 0);
+
+    threeControls = new OrbitControls(threeCamera, canvas);
+    threeControls.enableDamping = true;
+    threeControls.dampingFactor = 0.1;
+    threeControls.maxPolarAngle = Math.PI / 2.2;
+
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+    threeScene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    dirLight.position.set(-5, 10, 5);
+    threeScene.add(dirLight);
+
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
+    fillLight.position.set(5, 5, -5);
+    threeScene.add(fillLight);
+
+    onWindowResize();
+    window.addEventListener('resize', onWindowResize);
+
+    animateThree();
+  }
+
+  function onWindowResize() {
+    const canvas = $('world-canvas');
+    if (!canvas || !threeRenderer || !threeCamera) return;
+    const parent = canvas.parentElement;
+    const w = parent.clientWidth || window.innerWidth;
+    const h = parent.clientHeight || window.innerHeight;
+    threeRenderer.setSize(w, h);
+    threeCamera.aspect = w / h;
+    threeCamera.updateProjectionMatrix();
+  }
+
+  function animateThree() {
+    requestAnimationFrame(animateThree);
+    if (threeControls) threeControls.update();
+    if (threeRenderer && threeScene && threeCamera) {
+      threeRenderer.render(threeScene, threeCamera);
+    }
+  }
+
+  function buildHexWorld(payload) {
+    if (!threeScene) return;
+
+    // Clear old tiles
+    for (const key of Object.keys(tileMeshes)) {
+      threeScene.remove(tileMeshes[key]);
+    }
+    tileMeshes = {};
+
+    // Clear old player meshes
+    for (const key of Object.keys(playerMeshes)) {
+      threeScene.remove(playerMeshes[key]);
+    }
+    playerMeshes = {};
+
+    const tiles = payload.tiles || [];
+    const hexGeo = new THREE.CylinderGeometry(0.9, 0.9, 0.3, 6);
+
+    tiles.forEach(tile => {
+      const { q, r, type } = tile;
+      const color = TILE_COLORS[type] || 0x888888;
+      const height = TILE_HEIGHTS[type] || 0;
+      const material = new THREE.MeshLambertMaterial({ color });
+      const mesh = new THREE.Mesh(hexGeo, material);
+
+      const pos = hexToWorld(q, r);
+
+      // Scale Y for mountains, adjust pivot so base stays grounded
+      if (type === 'mountain') {
+        mesh.scale.set(1, 3, 1);
+        // CylinderGeometry h=0.3, scaled 3x → actual h=0.9, half=0.45
+        // Place so bottom aligns with height offset
+        mesh.position.set(pos.x, height + 0.45, pos.z);
+      } else {
+        mesh.position.set(pos.x, height, pos.z);
+      }
+
+      mesh.userData = { q, r, type };
+      threeScene.add(mesh);
+      tileMeshes[`${q},${r}`] = mesh;
+    });
+
+    // Center camera on map
+    const radius = payload.radius || 4;
+    threeCamera.position.set(0, radius * 2.5, radius * 2);
+    threeCamera.lookAt(0, 0, 0);
+    if (threeControls) threeControls.target.set(0, 0, 0);
+  }
+
+  function updatePlayerMeshes(players) {
+    if (!threeScene) return;
+
+    players.forEach(p => {
+      if (p.q == null || p.r == null) return;
+      const pos = hexToWorld(p.q, p.r);
+
+      if (playerMeshes[p.id]) {
+        playerMeshes[p.id].position.set(pos.x, 0.5, pos.z);
+      } else {
+        const geo = new THREE.SphereGeometry(0.25, 16, 16);
+        const isMe = p.id === playerId;
+        const mat = new THREE.MeshLambertMaterial({
+          color: isMe ? 0x6c63ff : 0xff6b6b
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(pos.x, 0.5, pos.z);
+        threeScene.add(mesh);
+        playerMeshes[p.id] = mesh;
+      }
+    });
+  }
+
+  function showMoveButtons(moves) {
+    const ui = $('world-ui');
+    ui.innerHTML = '';
+
+    const dirLabels = ['→', '↗', '↖', '←', '↙', '↘'];
+
+    moves.forEach((move, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'move-btn';
+      btn.textContent = dirLabels[i % dirLabels.length];
+      btn.addEventListener('click', () => {
+        channel.send({
+          type: 'broadcast',
+          event: 'action',
+          payload: {
+            playerId,
+            action: 'move',
+            target: { q: move.q, r: move.r }
+          }
+        });
+        ui.innerHTML = '';
+        $('world-status').textContent = '移動中...';
+        isMyTurn = false;
+      });
+      ui.appendChild(btn);
+    });
+  }
 
 })();
 </script>
