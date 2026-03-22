@@ -57,8 +57,11 @@ let W, H, SC
 
 function resize() {
   W = innerWidth; H = innerHeight
-  canvas.width = W; canvas.height = H
-  SC = Math.min(W / 320, H / 180)
+  const dpr = window.devicePixelRatio || 1
+  canvas.width = W * dpr; canvas.height = H * dpr
+  canvas.style.width = W + 'px'
+  canvas.style.height = H + 'px'
+  SC = Math.min(W / 320, H / 180) * dpr
 }
 resize()
 addEventListener('resize', resize)
@@ -297,10 +300,12 @@ function update(dt) {
 
 // ===== Render =====
 function render() {
-  ctx.clearRect(0, 0, W, H)
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
   ctx.save()
-  const ox = (W - 320 * SC) / 2
-  const oy = (H - 180 * SC) / 2
+  ctx.imageSmoothingEnabled = false
+  const dpr = window.devicePixelRatio || 1
+  const ox = (W * dpr - 320 * SC) / 2
+  const oy = (H * dpr - 180 * SC) / 2
   ctx.translate(ox, oy)
   ctx.scale(SC, SC)
 
@@ -323,7 +328,7 @@ function render() {
 
   // Player (with spin animation)
   const pImg = (hitAnim && hitAnim.phase === 'buried') ? IMG.prio1 : (frame === 0 ? IMG.prio1 : IMG.prio1_2)
-  const pScale = 3
+  const pScale = 5
   const pW = pImg.width * pScale
   const pH = pImg.height * pScale
   const pDrawX = playerX
@@ -362,8 +367,8 @@ function render() {
   // Ghosts
   for (const g of ghosts) {
     if (!g.active) continue
-    const gScale = 2.5
-    ctx.drawImage(IMG.obake, g.x - 8 * gScale, GROUND_Y - 10 * gScale + 15, IMG.obake.width * gScale, IMG.obake.height * gScale)
+    const gScale = 4
+    ctx.drawImage(IMG.obake, g.x - 8 * gScale, GROUND_Y - IMG.obake.height * gScale + 15, IMG.obake.width * gScale, IMG.obake.height * gScale)
   }
 
   // HP hearts
@@ -429,10 +434,12 @@ function render() {
 }
 
 function renderResult() {
-  ctx.clearRect(0, 0, W, H)
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
   ctx.save()
-  const ox = (W - 320 * SC) / 2
-  const oy = (H - 180 * SC) / 2
+  ctx.imageSmoothingEnabled = false
+  const dpr = window.devicePixelRatio || 1
+  const ox = (W * dpr - 320 * SC) / 2
+  const oy = (H * dpr - 180 * SC) / 2
   ctx.translate(ox, oy)
   ctx.scale(SC, SC)
 
