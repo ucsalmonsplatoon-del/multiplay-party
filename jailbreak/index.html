@@ -346,13 +346,20 @@ function render() {
   ctx.translate(ox, oy);
   ctx.scale(SC, SC);
 
-  // Background (fixed, no scroll) — clip to above floor
+  // Background (fixed, never scrolls) — only show above floor line
   ctx.save();
   ctx.beginPath();
-  ctx.rect(-20, -30, 360, DO.floor.y + 30);
+  ctx.rect(-20, -30, 360, DO.floor.y + 10);
   ctx.clip();
-  ctx.drawImage(IMG.music_rouya, DO.bg.x, DO.bg.y, 350, 220);
+  // Draw bg at fixed position, ignoring scrollX completely
+  var bgX = DO.bg.x;
+  var bgY = DO.bg.y;
+  ctx.drawImage(IMG.music_rouya, bgX, bgY, 350, 220);
   ctx.restore();
+
+  // Fill below bg with solid color (floor area background)
+  ctx.fillStyle = "#3a3a50";
+  ctx.fillRect(-20, DO.floor.y - 2, 360, 40);
 
   // Floor tiles (infinite scroll)
   var floorTileW = IMG.floor1.width * DO.floor.s;
