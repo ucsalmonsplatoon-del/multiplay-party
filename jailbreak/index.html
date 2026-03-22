@@ -567,6 +567,8 @@ joinBtn.addEventListener('click', () => {
     if (status === 'SUBSCRIBED') {
       phase = 'waiting'
       allPlayers.push({ id: myId })
+      // Send standard 'join' for host to detect, plus game-specific join
+      channel.send({ type: 'broadcast', event: 'join', payload: { playerId: myId, name: myId } })
       channel.send({ type: 'broadcast', event: 'jailbreak_join', payload: { playerId: myId } })
     }
   })
