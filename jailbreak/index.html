@@ -346,8 +346,15 @@ function render() {
   ctx.translate(ox, oy);
   ctx.scale(SC, SC);
 
+  // Background (fixed, no scroll) — clip to above floor
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(-20, -30, 360, DO.floor.y + 30);
+  ctx.clip();
   ctx.drawImage(IMG.music_rouya, DO.bg.x, DO.bg.y, 350, 220);
+  ctx.restore();
 
+  // Floor tiles (infinite scroll)
   var floorTileW = IMG.floor1.width * DO.floor.s;
   var floorOffset = -(scrollX % floorTileW);
   for (var x = floorOffset - floorTileW; x < 340; x += floorTileW) {
@@ -454,7 +461,12 @@ function renderCountdown() {
   ctx.translate(ox, oy);
   ctx.scale(SC, SC);
 
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(-20, -30, 360, DO.floor.y + 30);
+  ctx.clip();
   ctx.drawImage(IMG.music_rouya, DO.bg.x, DO.bg.y, 350, 220);
+  ctx.restore();
 
   var floorTileW = IMG.floor1.width * DO.floor.s;
   for (var x = -floorTileW; x < 340; x += floorTileW) {
