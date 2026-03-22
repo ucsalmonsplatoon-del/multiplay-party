@@ -185,25 +185,30 @@ function jump() {
   }
 }
 
+function screenToGame(clientX, clientY) {
+  const dpr = window.devicePixelRatio || 1
+  const ox = (W - 320 * SC / dpr) / 2
+  const oy = (H - 180 * SC / dpr) / 2
+  return {
+    x: (clientX - ox) / (SC / dpr),
+    y: (clientY - oy) / (SC / dpr),
+  }
+}
+
 canvas.addEventListener('pointerdown', (e) => {
   e.preventDefault()
   if (debugMode) {
-    const dpr = window.devicePixelRatio || 1
-    const ox = (W * dpr - 320 * SC) / 2
-    const oy = (H * dpr - 180 * SC) / 2
-    const mx = (e.clientX * dpr - ox) / SC
-    const my = (e.clientY * dpr - oy) / SC
-
+    const m = screenToGame(e.clientX, e.clientY)
     debugSelected = null
+    // Select closest object within 30px
+    let bestDist = 30
     for (const obj of debugObjects) {
-      const bx = obj.x, by = obj.y - obj.h * obj.s
-      const bw = obj.w * obj.s, bh = obj.h * obj.s
-      if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
-        debugSelected = obj
-        debugDragging = true
-        debugDragOff = { x: mx - obj.x, y: my - obj.y }
-        break
-      }
+      const dist = Math.abs(m.x - obj.x) + Math.abs(m.y - obj.y)
+      if (dist < bestDist) { bestDist = dist; debugSelected = obj }
+    }
+    if (debugSelected) {
+      debugDragging = true
+      debugDragOff = { x: m.x - debugSelected.x, y: m.y - debugSelected.y }
     }
     return
   }
@@ -211,12 +216,11 @@ canvas.addEventListener('pointerdown', (e) => {
 })
 canvas.addEventListener('pointermove', (e) => {
   if (!debugMode || !debugDragging || !debugSelected) return
-  const dpr = window.devicePixelRatio || 1
-  const ox = (W * dpr - 320 * SC) / 2
-  const oy = (H * dpr - 180 * SC) / 2
-  debugSelected.x = (e.clientX * dpr - ox) / SC - debugDragOff.x
-  debugSelected.y = (e.clientY * dpr - oy) / SC - debugDragOff.y
+  const m = screenToGame(e.clientX, e.clientY)
+  debugSelected.x = Math.round(m.x - debugDragOff.x)
+  debugSelected.y = Math.round(m.y - debugDragOff.y)
   if (debugSelected.name === 'player') playerX = debugSelected.x
+  console.log(`[DEBUG] ${debugSelected.name}: x=${debugSelected.x}, y=${debugSelected.y}, s=${debugSelected.s}`)
 })
 canvas.addEventListener('pointerup', () => { debugDragging = false })
 addEventListener('keydown', (e) => {
