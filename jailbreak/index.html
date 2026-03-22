@@ -306,8 +306,9 @@ function update(dt) {
     if (!g.active) continue;
     g.x += g.dir * (g.speed + SCROLL_SPEED);
 
-    // Already dodged — keep running to left edge, then send to next player
+    // Already dodged — sprint to left edge, then send to next player
     if (g.dodged) {
+      g.x -= 6; // fast exit speed
       if (g.x < -40) {
         g.active = false;
         sendGhostToOpponent();
