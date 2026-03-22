@@ -67,14 +67,14 @@ resize()
 addEventListener('resize', resize)
 
 // ===== Game Constants =====
-const GROUND_Y = 140
-const GRAVITY = 0.6
-const JUMP_FORCE = -8
-const GHOST_SPEED_INIT = 2.5
-const GHOST_SPEED_ACCEL = 0.05 // per successful dodge
+const GROUND_Y = 130
+const GRAVITY = 0.5
+const JUMP_FORCE = -9
+const GHOST_SPEED_INIT = 1.5
+const GHOST_SPEED_ACCEL = 0.03 // per successful dodge
 const GAME_DURATION = 60 // seconds
-const HP_MAX = 5
-const ESCAPE_SCORE = 5000 // co-op score to escape
+const HP_MAX = 7
+const ESCAPE_SCORE = 2000 // co-op score to escape
 
 // ===== Game State =====
 let phase = 'join' // join, waiting, playing, result
@@ -151,7 +151,7 @@ function sendGhostToOpponent() {
   sharedCombo++
   if (combo > maxCombo) maxCombo = combo
   // Co-op scoring: combo multiplier rewards teamwork
-  const pts = 100 + sharedCombo * 20
+  const pts = 200 + sharedCombo * 30
   score += pts
 
   // Send ghost to NEXT player in order (1P→2P→3P→1P...)
@@ -237,11 +237,11 @@ function update(dt) {
 
     // Check collision with player (skip during hit animation)
     const ghostX = g.x
-    const isNear = Math.abs(ghostX - playerX) < 15
+    const isNear = Math.abs(ghostX - playerX) < 12
     if (hitAnim) continue // invincible during knockback
 
     if (isNear && !g.hit) {
-      if (playerY < GROUND_Y - 10) {
+      if (playerY < GROUND_Y - 5) { // generous jump detection
         // Dodged! Send to opponent
         g.hit = true
         g.active = false
@@ -291,10 +291,10 @@ function update(dt) {
     endGame()
   }
 
-  // Auto-spawn for single player
+  // Auto-spawn for single player (slower pace)
   if (allPlayers.length < 2 && ghosts.length === 0 && ghostCooldown <= 0) {
     spawnGhost(true)
-    ghostCooldown = Math.max(500, 2000 - dodgeCount * 50)
+    ghostCooldown = Math.max(800, 2500 - dodgeCount * 30)
   }
 }
 
@@ -332,7 +332,7 @@ function render() {
   const pW = pImg.width * pScale
   const pH = pImg.height * pScale
   const pDrawX = playerX
-  const pDrawY = playerY - pH + 15
+  const pDrawY = playerY - pH + 5
 
   ctx.save()
   if (hitAnim) {
@@ -470,7 +470,7 @@ function startGame() {
   score = 0; combo = 0; maxCombo = 0; dodgeCount = 0
   ghostSpeed = GHOST_SPEED_INIT
   playerY = GROUND_Y; playerVY = 0; isJumping = false
-  ghosts = []; ghostCooldown = 1500
+  ghosts = []; ghostCooldown = 2500
   gameStart = performance.now()
 
   document.getElementById('wait-msg').style.display = 'none'
