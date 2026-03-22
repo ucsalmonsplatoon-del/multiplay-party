@@ -258,11 +258,6 @@ function spawnGhost(fromRight, speed) {
 
 function sendGhostToOpponent() {
   if (!channel) return;
-  dodgeCount++;
-  ghostSpeed = GHOST_SPEED_INIT + dodgeCount * GHOST_SPEED_ACCEL;
-  combo++; sharedCombo++;
-  if (combo > maxCombo) maxCombo = combo;
-  score += 200 + sharedCombo * 30;
   var myIdx = -1;
   for (var i = 0; i < allPlayers.length; i++) { if (allPlayers[i].id === myId) { myIdx = i; break; } }
   var nextIdx = (myIdx + 1) % allPlayers.length;
@@ -310,11 +305,31 @@ function update(dt) {
     var g = ghosts[i];
     if (!g.active) continue;
     g.x += g.dir * (g.speed + SCROLL_SPEED);
+
+    // Already dodged — keep running to left edge, then send to next player
+    if (g.dodged) {
+      if (g.x < -40) {
+        g.active = false;
+        sendGhostToOpponent();
+        broadcastState();
+      }
+      continue;
+    }
+
     var isNear = Math.abs(g.x - playerX) < 12;
     if (hitAnim) continue;
     if (isNear && !g.hit) {
       if (playerY < GROUND_Y - 5) {
-        g.hit = true; g.active = false; sendGhostToOpponent(); broadcastState();
+        // Dodged! Ghost keeps running through to left edge
+        g.hit = true;
+        g.dodged = true;
+        // Score immediately
+        dodgeCount++;
+        ghostSpeed = GHOST_SPEED_INIT + dodgeCount * GHOST_SPEED_ACCEL;
+        combo++; sharedCombo++;
+        if (combo > maxCombo) maxCombo = combo;
+        score += 200 + sharedCombo * 30;
+        broadcastState();
       } else if (!hitAnim) {
         g.hit = true; g.active = false; hp--; combo = 0; sharedCombo = 0; broadcastState();
         if (channel) channel.send({ type: "broadcast", event: "jailbreak_combo_break", payload: { fromId: myId } });
@@ -322,7 +337,8 @@ function update(dt) {
         playerVY = 0; isJumping = true;
       }
     }
-    if (g.x < -40 || g.x > 400) g.active = false;
+    // Off screen right (missed spawn)
+    if (g.x < -40 || g.x > 500) g.active = false;
   }
   ghosts = ghosts.filter(function(g) { return g.active; });
 
