@@ -19,7 +19,7 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
 </head>
 <body>
 <div id="join-screen">
-  <h1>👻 JailBreakers</h1>
+  <h1>JailBreakers</h1>
   <div class="sub" id="room-info"></div>
   <input id="name-input" type="text" placeholder="名前を入力" maxlength="10">
   <br><button id="join-btn" disabled>参加</button>
@@ -29,743 +29,623 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-const params = new URLSearchParams(location.search)
-const roomId = params.get('room')
+var params = new URLSearchParams(location.search);
+var roomId = params.get("room");
 
-const SUPABASE_URL = 'https://eixvkfbdplxgpypxjtml.supabase.co'
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVpeHZrZmJkcGx4Z3B5cHhqdG1sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQzMjI5NjksImV4cCI6MjA3OTg5ODk2OX0.vmSeqMS6DQW_gFk9rIhq2lj_x9RTgncBFfhSb9_i0y8'
+var SUPABASE_URL = "https://eixvkfbdplxgpypxjtml.supabase.co";
+var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVpeHZrZmJkcGx4Z3B5cHhqdG1sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQzMjI5NjksImV4cCI6MjA3OTg5ODk2OX0.vmSeqMS6DQW_gFk9rIhq2lj_x9RTgncBFfhSb9_i0y8";
 
-// ===== Assets =====
-const IMG = {}
-const imgList = ['music_rouya','floor1','prio1','prio1_2','pri2','pri2_2','obake','toge','door_closed','door_open','win','lose','exclamation']
-let loaded = 0
+var IMG = {};
+var imgList = ["music_rouya","floor1","prio1","prio1_2","pri2","pri2_2","obake","toge","door_closed","door_open","win","lose","exclamation"];
+var loaded = 0;
 
 function loadImages(cb) {
-  for (const n of imgList) {
-    const img = new Image()
-    img.onload = () => { loaded++; if (loaded >= imgList.length) cb() }
-    img.onerror = () => { loaded++; if (loaded >= imgList.length) cb() }
-    img.src = `assets/${n}.png`
-    IMG[n] = img
+  for (var i = 0; i < imgList.length; i++) {
+    var n = imgList[i];
+    (function(name) {
+      var img = new Image();
+      img.onload = function() { loaded++; if (loaded >= imgList.length) cb(); };
+      img.onerror = function() { loaded++; if (loaded >= imgList.length) cb(); };
+      img.src = "assets/" + name + ".png";
+      IMG[name] = img;
+    })(n);
   }
 }
 
-// ===== Canvas =====
-const canvas = document.getElementById('c')
-const ctx = canvas.getContext('2d')
-let W, H, SC
+var canvas = document.getElementById("c");
+var ctx = canvas.getContext("2d");
+var W, H, SC;
 
 function resize() {
-  W = innerWidth; H = innerHeight
-  const dpr = window.devicePixelRatio || 1
-  canvas.width = W * dpr; canvas.height = H * dpr
-  canvas.style.width = W + 'px'
-  canvas.style.height = H + 'px'
-  SC = Math.min(W / 320, H / 180) * dpr
+  W = innerWidth; H = innerHeight;
+  var dpr = window.devicePixelRatio || 1;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  canvas.style.width = W + "px";
+  canvas.style.height = H + "px";
+  SC = Math.min(W / 320, H / 180) * dpr;
 }
-resize()
-addEventListener('resize', resize)
+resize();
+addEventListener("resize", resize);
 
-// ===== Game Constants =====
-const GROUND_Y = 178
-const GRAVITY = 0.5
-const JUMP_FORCE = -9
-const GHOST_SPEED_INIT = 1.3
-const GHOST_SPEED_ACCEL = 0.02 // per successful dodge
-const GAME_DURATION = 60 // seconds
-const HP_MAX = 7
-const ESCAPE_SCORE = 2000 // co-op score to escape
+var GROUND_Y = 178;
+var GRAVITY = 0.5;
+var JUMP_FORCE = -9;
+var GHOST_SPEED_INIT = 1.3;
+var GHOST_SPEED_ACCEL = 0.02;
+var GAME_DURATION = 60;
+var HP_MAX = 7;
+var ESCAPE_SCORE = 2000;
+var SCROLL_SPEED = 1.5;
 
-// ===== Game State =====
-let phase = 'join' // join, waiting, playing, result
-let myId = null
-let channel = null
-let allPlayers = [] // [{id, name}]
-let myIndex = -1 // 0=P1, 1=P2
+var phase = "join";
+var myId = null;
+var channel = null;
+var allPlayers = [];
+var myIndex = -1;
 
-// Player state
-let playerX = 104
-let playerY = GROUND_Y
-let playerVY = 0
-let isJumping = false
-let hp = HP_MAX
-let score = 0
-let combo = 0
-let maxCombo = 0
-let dodgeCount = 0
+var playerX = 104;
+var playerY = GROUND_Y;
+var playerVY = 0;
+var isJumping = false;
+var hp = HP_MAX;
+var score = 0;
+var combo = 0;
+var maxCombo = 0;
+var dodgeCount = 0;
 
-// Hit animation state
-let hitAnim = null // { phase, timer, spinAngle, peakY, dead }
-// phase: 'spin_up' → 'fall' → 'land' (or 'buried' if dead)
+var hitAnim = null;
+var ghosts = [];
+var ghostSpeed = GHOST_SPEED_INIT;
+var ghostCooldown = 0;
 
-// Ghost state
-let ghosts = [] // [{x, speed, active}]
-let ghostSpeed = GHOST_SPEED_INIT
-let ghostCooldown = 0
+var scrollX = 0;
+var countdownStart = 0;
+var gameStart = 0;
+var bgm = null;
+var lastFrame = 0;
 
-// Timing
-let gameStart = 0
-let bgm = null
-let lastFrame = 0
-let animFrame = 0
+var debugMode = params.has("debug");
+var debugSelected = null;
+var debugDragging = false;
+var debugDragOff = {x:0, y:0};
 
-// ===== Debug Mode =====
-let debugMode = params.has('debug')
-let debugSelected = null
-let debugDragging = false
-let debugDragOff = {x:0, y:0}
-
-// All drawable objects with position/scale — render() reads these
-const DO = {
-  bg:    { name: 'bg',    x: 0,   y: 0,   w: 320, h: 180, s: 1 },
-  floor: { name: 'floor', x: -2,  y: 181, w: 320, h: 20,  s: 2.5 },
-  door:  { name: 'door',  x: 285, y: 90,  w: 25,  h: 50,  s: 1 },
-  player:{ name: 'player', x: 104, y: 178, w: 15,  h: 15,  s: 2.5 },
-  ghost: { name: 'ghost',  x: 280, y: 178, w: 16, h: 16,  s: 2.5 },
-}
-const debugObjects = Object.values(DO)
+var DO = {
+  bg:    { name: "bg",    x: -13, y: -21, w: 320, h: 180, s: 1 },
+  floor: { name: "floor", x: -3,  y: 179, w: 320, h: 20,  s: 2.5 },
+  door:  { name: "door",  x: 268, y: -69, w: 25,  h: 50,  s: 5 },
+  player:{ name: "player", x: 104, y: 178, w: 15,  h: 15,  s: 2.5 },
+  ghost: { name: "ghost",  x: 280, y: 178, w: 16, h: 16,  s: 2.5 }
+};
+var debugObjects = [DO.bg, DO.floor, DO.door, DO.player, DO.ghost];
 
 if (debugMode) {
-  // Show debug button overlay for iPad
-  const dbtn = document.createElement('button')
-  dbtn.textContent = '📋 Copy Layout'
-  dbtn.style.cssText = 'position:fixed;top:8px;right:8px;z-index:200;padding:8px 12px;border:none;border-radius:8px;background:#0a0;color:#fff;font-size:13px;cursor:pointer;'
-  dbtn.addEventListener('click', () => {
-    const data = {}
-    for (const o of debugObjects) data[o.name] = { x: o.x, y: o.y, s: o.s }
-    const text = JSON.stringify(data, null, 2)
-    navigator.clipboard.writeText(text).then(() => dbtn.textContent = '✅ Copied!')
-    .catch(() => { prompt('Copy:', text) })
-    setTimeout(() => dbtn.textContent = '📋 Copy Layout', 2000)
-  })
-  document.body.appendChild(dbtn)
+  var dbtn = document.createElement("button");
+  dbtn.textContent = "Copy Layout";
+  dbtn.style.cssText = "position:fixed;top:8px;right:8px;z-index:200;padding:8px 12px;border:none;border-radius:8px;background:#0a0;color:#fff;font-size:13px;cursor:pointer;";
+  dbtn.addEventListener("click", function() {
+    var data = {};
+    for (var i = 0; i < debugObjects.length; i++) { var o = debugObjects[i]; data[o.name] = { x: o.x, y: o.y, s: o.s }; }
+    var text = JSON.stringify(data, null, 2);
+    navigator.clipboard.writeText(text).then(function() { dbtn.textContent = "Copied!"; })
+    .catch(function() { prompt("Copy:", text); });
+    setTimeout(function() { dbtn.textContent = "Copy Layout"; }, 2000);
+  });
+  document.body.appendChild(dbtn);
 
-  // Toggle button for iPad (no keyboard)
-  const toggleBtn = document.createElement('button')
-  toggleBtn.textContent = '🔧 Debug OFF'
-  toggleBtn.style.cssText = 'position:fixed;top:8px;left:8px;z-index:200;padding:8px 12px;border:none;border-radius:8px;background:#333;color:#fff;font-size:13px;cursor:pointer;'
-  toggleBtn.addEventListener('click', () => {
-    debugMode = !debugMode
-    toggleBtn.textContent = debugMode ? '🔧 Debug OFF' : '🔧 Debug ON'
-    debugSelected = null
-  })
-  document.body.appendChild(toggleBtn)
+  var toggleBtn = document.createElement("button");
+  toggleBtn.textContent = "Debug OFF";
+  toggleBtn.style.cssText = "position:fixed;top:8px;left:8px;z-index:200;padding:8px 12px;border:none;border-radius:8px;background:#333;color:#fff;font-size:13px;cursor:pointer;";
+  toggleBtn.addEventListener("click", function() {
+    debugMode = !debugMode;
+    toggleBtn.textContent = debugMode ? "Debug OFF" : "Debug ON";
+    debugSelected = null;
+  });
+  document.body.appendChild(toggleBtn);
 
-  // Scale buttons for iPad
-  const scaleUp = document.createElement('button')
-  scaleUp.textContent = '➕ Scale'
-  scaleUp.style.cssText = 'position:fixed;bottom:50px;right:8px;z-index:200;padding:8px;border:none;border-radius:8px;background:#555;color:#fff;font-size:13px;cursor:pointer;'
-  scaleUp.addEventListener('click', () => { if (debugSelected) { debugSelected.s = Math.round((debugSelected.s + 0.5) * 10) / 10 } })
-  document.body.appendChild(scaleUp)
+  var scaleUp = document.createElement("button");
+  scaleUp.textContent = "+ Scale";
+  scaleUp.style.cssText = "position:fixed;bottom:50px;right:8px;z-index:200;padding:8px;border:none;border-radius:8px;background:#555;color:#fff;font-size:13px;cursor:pointer;";
+  scaleUp.addEventListener("click", function() { if (debugSelected) { debugSelected.s = Math.round((debugSelected.s + 0.5) * 10) / 10; } });
+  document.body.appendChild(scaleUp);
 
-  const scaleDown = document.createElement('button')
-  scaleDown.textContent = '➖ Scale'
-  scaleDown.style.cssText = 'position:fixed;bottom:90px;right:8px;z-index:200;padding:8px;border:none;border-radius:8px;background:#555;color:#fff;font-size:13px;cursor:pointer;'
-  scaleDown.addEventListener('click', () => { if (debugSelected) { debugSelected.s = Math.max(0.5, Math.round((debugSelected.s - 0.5) * 10) / 10) } })
-  document.body.appendChild(scaleDown)
+  var scaleDown = document.createElement("button");
+  scaleDown.textContent = "- Scale";
+  scaleDown.style.cssText = "position:fixed;bottom:90px;right:8px;z-index:200;padding:8px;border:none;border-radius:8px;background:#555;color:#fff;font-size:13px;cursor:pointer;";
+  scaleDown.addEventListener("click", function() { if (debugSelected) { debugSelected.s = Math.max(0.5, Math.round((debugSelected.s - 0.5) * 10) / 10); } });
+  document.body.appendChild(scaleDown);
 }
 
 function drawDebugOverlay() {
-  ctx.save()
-  const dpr = window.devicePixelRatio || 1
-  const ox = (W * dpr - 320 * SC) / 2
-  const oy = (H * dpr - 180 * SC) / 2
-  ctx.translate(ox, oy)
-  ctx.scale(SC, SC)
-
-  // Draw bounding boxes for all objects
-  for (const obj of debugObjects) {
-    const sel = obj === debugSelected
-    ctx.strokeStyle = sel ? '#0f0' : '#ff0'
-    ctx.lineWidth = sel ? 1.5 : 0.5
-    ctx.setLineDash(sel ? [] : [3, 3])
-    ctx.strokeRect(obj.x, obj.y - obj.h * obj.s, obj.w * obj.s, obj.h * obj.s)
-
-    // Label
-    ctx.fillStyle = sel ? '#0f0' : '#ff0'
-    ctx.font = '6px monospace'
-    ctx.fillText(`${obj.name} (${Math.round(obj.x)},${Math.round(obj.y)}) s=${obj.s.toFixed(1)}`, obj.x, obj.y - obj.h * obj.s - 2)
+  ctx.save();
+  var dpr = window.devicePixelRatio || 1;
+  var ox = (W * dpr - 320 * SC) / 2;
+  var oy = (H * dpr - 180 * SC) / 2;
+  ctx.translate(ox, oy);
+  ctx.scale(SC, SC);
+  for (var i = 0; i < debugObjects.length; i++) {
+    var obj = debugObjects[i];
+    var sel = obj === debugSelected;
+    ctx.strokeStyle = sel ? "#0f0" : "#ff0";
+    ctx.lineWidth = sel ? 1.5 : 0.5;
+    ctx.setLineDash(sel ? [] : [3, 3]);
+    ctx.strokeRect(obj.x, obj.y - obj.h * obj.s, obj.w * obj.s, obj.h * obj.s);
+    ctx.fillStyle = sel ? "#0f0" : "#ff0";
+    ctx.font = "6px monospace";
+    ctx.fillText(obj.name + " (" + Math.round(obj.x) + "," + Math.round(obj.y) + ") s=" + obj.s.toFixed(1), obj.x, obj.y - obj.h * obj.s - 2);
   }
-  ctx.setLineDash([])
-
-  // Debug panel
-  ctx.fillStyle = 'rgba(0,0,0,0.8)'
-  ctx.fillRect(0, 0, 160, 50)
-  ctx.fillStyle = '#0f0'
-  ctx.font = 'bold 7px monospace'
-  ctx.fillText('DEBUG MODE [D=toggle]', 4, 8)
-  ctx.fillText('[Click=select] [Drag=move]', 4, 16)
-  ctx.fillText('[+/-=scale] [Arrow=nudge]', 4, 24)
+  ctx.setLineDash([]);
+  ctx.fillStyle = "rgba(0,0,0,0.8)";
+  ctx.fillRect(0, 0, 160, 50);
+  ctx.fillStyle = "#0f0";
+  ctx.font = "bold 7px monospace";
+  ctx.fillText("DEBUG MODE [D=toggle]", 4, 8);
+  ctx.fillText("[Click=select] [Drag=move]", 4, 16);
+  ctx.fillText("[+/-=scale] [Arrow=nudge]", 4, 24);
   if (debugSelected) {
-    ctx.fillStyle = '#ff0'
-    ctx.fillText(`Selected: ${debugSelected.name}`, 4, 34)
-    ctx.fillText(`x=${Math.round(debugSelected.x)} y=${Math.round(debugSelected.y)} s=${debugSelected.s.toFixed(1)}`, 4, 42)
+    ctx.fillStyle = "#ff0";
+    ctx.fillText("Selected: " + debugSelected.name, 4, 34);
+    ctx.fillText("x=" + Math.round(debugSelected.x) + " y=" + Math.round(debugSelected.y) + " s=" + debugSelected.s.toFixed(1), 4, 42);
   }
-
-  ctx.restore()
+  ctx.restore();
 }
 
+var opponentScore = 0;
+var opponentHP = HP_MAX;
+var teamScore = 0;
+var sharedCombo = 0;
+var playerScores = {};
 
-// Opponent state (received via broadcast)
-let opponentScore = 0
-let opponentHP = HP_MAX
-let opponentName = '相棒'
-let teamScore = 0 // combined co-op score
-let sharedCombo = 0 // breaks if either player misses
-const playerScores = {} // id -> {score, hp, name}
-
-// ===== Input =====
 function jump() {
-  if (phase !== 'playing') return
-  if (hitAnim) return // can't jump during hit animation
-  if (!isJumping) {
-    playerVY = JUMP_FORCE
-    isJumping = true
-  }
+  if (phase !== "playing") return;
+  if (hitAnim) return;
+  if (!isJumping) { playerVY = JUMP_FORCE; isJumping = true; }
 }
 
 function screenToGame(clientX, clientY) {
-  const dpr = window.devicePixelRatio || 1
-  const ox = (W - 320 * SC / dpr) / 2
-  const oy = (H - 180 * SC / dpr) / 2
-  return {
-    x: (clientX - ox) / (SC / dpr),
-    y: (clientY - oy) / (SC / dpr),
-  }
+  var dpr = window.devicePixelRatio || 1;
+  var ox = (W - 320 * SC / dpr) / 2;
+  var oy = (H - 180 * SC / dpr) / 2;
+  return { x: (clientX - ox) / (SC / dpr), y: (clientY - oy) / (SC / dpr) };
 }
 
-canvas.addEventListener('pointerdown', (e) => {
-  e.preventDefault()
+canvas.addEventListener("pointerdown", function(e) {
+  e.preventDefault();
   if (debugMode) {
-    const m = screenToGame(e.clientX, e.clientY)
-    debugSelected = null
-    // Select object whose bounding box contains the click (smallest first)
-    let bestArea = Infinity
-    for (const obj of debugObjects) {
-      const bw = obj.w * obj.s, bh = obj.h * obj.s
-      const bx = obj.x, by = obj.y - bh
+    var m = screenToGame(e.clientX, e.clientY);
+    debugSelected = null;
+    var bestArea = Infinity;
+    for (var i = 0; i < debugObjects.length; i++) {
+      var obj = debugObjects[i];
+      var bw = obj.w * obj.s, bh = obj.h * obj.s;
+      var bx = obj.x, by = obj.y - bh;
       if (m.x >= bx && m.x <= bx + bw && m.y >= by && m.y <= by + bh) {
-        const area = bw * bh
-        if (area < bestArea) { bestArea = area; debugSelected = obj }
+        var area = bw * bh;
+        if (area < bestArea) { bestArea = area; debugSelected = obj; }
       }
     }
-    if (debugSelected) {
-      debugDragging = true
-      debugDragOff = { x: m.x - debugSelected.x, y: m.y - debugSelected.y }
-    }
-    return
+    if (debugSelected) { debugDragging = true; debugDragOff = { x: m.x - debugSelected.x, y: m.y - debugSelected.y }; }
+    return;
   }
-  jump()
-})
-canvas.addEventListener('pointermove', (e) => {
-  if (!debugMode || !debugDragging || !debugSelected) return
-  const m = screenToGame(e.clientX, e.clientY)
-  debugSelected.x = Math.round(m.x - debugDragOff.x)
-  debugSelected.y = Math.round(m.y - debugDragOff.y)
-  if (debugSelected.name === 'player') { playerX = debugSelected.x; playerY = debugSelected.y }
-  console.log(`[DEBUG] ${debugSelected.name}: x=${debugSelected.x}, y=${debugSelected.y}, s=${debugSelected.s}`)
-})
-canvas.addEventListener('pointerup', () => { debugDragging = false })
-addEventListener('keydown', (e) => {
-  if (e.key === 'd') {
-    debugMode = !debugMode; debugSelected = null; return
-  }
-
+  jump();
+});
+canvas.addEventListener("pointermove", function(e) {
+  if (!debugMode || !debugDragging || !debugSelected) return;
+  var m = screenToGame(e.clientX, e.clientY);
+  debugSelected.x = Math.round(m.x - debugDragOff.x);
+  debugSelected.y = Math.round(m.y - debugDragOff.y);
+  if (debugSelected.name === "player") { playerX = debugSelected.x; playerY = debugSelected.y; }
+});
+canvas.addEventListener("pointerup", function() { debugDragging = false; });
+addEventListener("keydown", function(e) {
+  if (e.key === "d") { debugMode = !debugMode; debugSelected = null; return; }
   if (debugMode && debugSelected) {
-    const step = e.shiftKey ? 5 : 1
-    if (e.key === 'ArrowLeft') { debugSelected.x -= step; e.preventDefault() }
-    if (e.key === 'ArrowRight') { debugSelected.x += step; e.preventDefault() }
-    if (e.key === 'ArrowUp') { debugSelected.y -= step; e.preventDefault() }
-    if (e.key === 'ArrowDown') { debugSelected.y += step; e.preventDefault() }
-    if (e.key === '=' || e.key === '+') { debugSelected.s = Math.round((debugSelected.s + 0.5) * 10) / 10 }
-    if (e.key === '-') { debugSelected.s = Math.max(0.5, Math.round((debugSelected.s - 0.5) * 10) / 10) }
-    // Apply to game
-    if (debugSelected.name === 'player') { playerX = debugSelected.x; playerY = debugSelected.y }
-    // Log for copying values
-    console.log(`[DEBUG] ${debugSelected.name}: x=${debugSelected.x}, y=${debugSelected.y}, s=${debugSelected.s}`)
-    return
+    var step = e.shiftKey ? 5 : 1;
+    if (e.key === "ArrowLeft") { debugSelected.x -= step; e.preventDefault(); }
+    if (e.key === "ArrowRight") { debugSelected.x += step; e.preventDefault(); }
+    if (e.key === "ArrowUp") { debugSelected.y -= step; e.preventDefault(); }
+    if (e.key === "ArrowDown") { debugSelected.y += step; e.preventDefault(); }
+    if (e.key === "=" || e.key === "+") { debugSelected.s = Math.round((debugSelected.s + 0.5) * 10) / 10; }
+    if (e.key === "-") { debugSelected.s = Math.max(0.5, Math.round((debugSelected.s - 0.5) * 10) / 10); }
+    if (debugSelected.name === "player") { playerX = debugSelected.x; playerY = debugSelected.y; }
+    return;
   }
+  if (e.key === " " || e.key === "ArrowUp" || e.key === "w") { e.preventDefault(); jump(); }
+});
 
-  if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'w') { e.preventDefault(); jump() }
-})
-
-// ===== Ghost Management =====
-function spawnGhost(fromRight = true, speed) {
-  ghosts.push({
-    x: fromRight ? 280 : -30,
-    speed: speed || ghostSpeed,
-    dir: fromRight ? -1 : 1,
-    active: true,
-    hit: false,
-  })
+function spawnGhost(fromRight, speed) {
+  ghosts.push({ x: 340, speed: speed || ghostSpeed, dir: -1, active: true, hit: false });
 }
 
 function sendGhostToOpponent() {
-  if (!channel) return
-  dodgeCount++
-  ghostSpeed = GHOST_SPEED_INIT + dodgeCount * GHOST_SPEED_ACCEL
-  combo++
-  sharedCombo++
-  if (combo > maxCombo) maxCombo = combo
-  // Co-op scoring: combo multiplier rewards teamwork
-  const pts = 200 + sharedCombo * 30
-  score += pts
-
-  // Send ghost to NEXT player in order (1P→2P→3P→1P...)
-  const myIdx = allPlayers.findIndex(p => p.id === myId)
-  const nextIdx = (myIdx + 1) % allPlayers.length
-  const targetId = allPlayers.length > 1 ? allPlayers[nextIdx].id : null
-  channel.send({
-    type: 'broadcast',
-    event: 'jailbreak_ghost',
-    payload: { fromId: myId, targetId, speed: ghostSpeed, combo: sharedCombo },
-  })
-  broadcastState()
+  if (!channel) return;
+  dodgeCount++;
+  ghostSpeed = GHOST_SPEED_INIT + dodgeCount * GHOST_SPEED_ACCEL;
+  combo++; sharedCombo++;
+  if (combo > maxCombo) maxCombo = combo;
+  score += 200 + sharedCombo * 30;
+  var myIdx = -1;
+  for (var i = 0; i < allPlayers.length; i++) { if (allPlayers[i].id === myId) { myIdx = i; break; } }
+  var nextIdx = (myIdx + 1) % allPlayers.length;
+  var targetId = allPlayers.length > 1 ? allPlayers[nextIdx].id : null;
+  channel.send({ type: "broadcast", event: "jailbreak_ghost", payload: { fromId: myId, targetId: targetId, speed: ghostSpeed, combo: sharedCombo } });
+  broadcastState();
 }
 
-// ===== Update =====
 function update(dt) {
-  if (phase !== 'playing') return
+  if (phase !== "playing") return;
+  var elapsed = (performance.now() - gameStart) / 1000;
 
-  const elapsed = (performance.now() - gameStart) / 1000
+  scrollX += SCROLL_SPEED;
 
-  // Hit animation physics
   if (hitAnim) {
-    hitAnim.timer += dt
-    hitAnim.spinAngle += 0.4 // fast spin
-
-    if (hitAnim.phase === 'spin_up') {
-      hitAnim.vy += 0.15 // slow gravity during rise
-      playerY += hitAnim.vy
-      if (hitAnim.vy > 0) {
-        hitAnim.phase = 'fall'
-      }
-    } else if (hitAnim.phase === 'fall') {
-      hitAnim.vy += 0.4 // normal gravity
-      playerY += hitAnim.vy
+    hitAnim.timer += dt;
+    hitAnim.spinAngle += 0.4;
+    if (hitAnim.phase === "spin_up") {
+      hitAnim.vy += 0.15; playerY += hitAnim.vy;
+      if (hitAnim.vy > 0) hitAnim.phase = "fall";
+    } else if (hitAnim.phase === "fall") {
+      hitAnim.vy += 0.4; playerY += hitAnim.vy;
       if (playerY >= GROUND_Y) {
         if (hitAnim.dead) {
-          // Head buried in ground!
-          hitAnim.phase = 'buried'
-          playerY = GROUND_Y + 10 // partially underground
-          hitAnim.spinAngle = Math.PI // upside down
-          setTimeout(() => endGame(), 1500)
-        } else {
-          // Normal landing — bounce a little
-          hitAnim.phase = 'land'
-          playerY = GROUND_Y
-          hitAnim.vy = -3 // small bounce
-        }
+          hitAnim.phase = "buried"; playerY = GROUND_Y + 10; hitAnim.spinAngle = Math.PI;
+          setTimeout(function() { endGame(); }, 1500);
+        } else { hitAnim.phase = "land"; playerY = GROUND_Y; hitAnim.vy = -3; }
       }
-    } else if (hitAnim.phase === 'land') {
-      hitAnim.vy += 0.5
-      playerY += hitAnim.vy
-      hitAnim.spinAngle *= 0.9 // slow down spin
-      if (playerY >= GROUND_Y) {
-        playerY = GROUND_Y
-        hitAnim = null // animation done, back to normal
-        isJumping = false
-      }
+    } else if (hitAnim.phase === "land") {
+      hitAnim.vy += 0.5; playerY += hitAnim.vy; hitAnim.spinAngle *= 0.9;
+      if (playerY >= GROUND_Y) { playerY = GROUND_Y; hitAnim = null; isJumping = false; }
     }
-    // buried phase: just stay stuck
-    return // skip normal physics during hit anim
+    return;
   }
 
-  // Normal player physics
-  playerVY += GRAVITY
-  playerY += playerVY
-  if (playerY >= GROUND_Y) {
-    playerY = GROUND_Y
-    playerVY = 0
-    isJumping = false
-  }
+  playerVY += GRAVITY; playerY += playerVY;
+  if (playerY >= GROUND_Y) { playerY = GROUND_Y; playerVY = 0; isJumping = false; }
 
-  // Ghost cooldown for auto-spawn (if no opponent connected, self-play)
-  ghostCooldown -= dt
+  ghostCooldown -= dt;
   if (ghosts.length === 0 && ghostCooldown <= 0 && allPlayers.length < 2) {
-    spawnGhost(true)
-    ghostCooldown = 2000 / (1 + dodgeCount * 0.1)
+    spawnGhost(true); ghostCooldown = 2000 / (1 + dodgeCount * 0.1);
   }
 
-  // Update ghosts
-  for (const g of ghosts) {
-    if (!g.active) continue
-    g.x += g.dir * g.speed
-
-    // Check collision with player (skip during hit animation)
-    const ghostX = g.x
-    const isNear = Math.abs(ghostX - playerX) < 12
-    if (hitAnim) continue // invincible during knockback
-
+  for (var i = 0; i < ghosts.length; i++) {
+    var g = ghosts[i];
+    if (!g.active) continue;
+    g.x += g.dir * g.speed;
+    var isNear = Math.abs(g.x - playerX) < 12;
+    if (hitAnim) continue;
     if (isNear && !g.hit) {
-      if (playerY < GROUND_Y - 5) { // generous jump detection
-        // Dodged! Send to opponent
-        g.hit = true
-        g.active = false
-        sendGhostToOpponent()
-        broadcastState()
+      if (playerY < GROUND_Y - 5) {
+        g.hit = true; g.active = false; sendGhostToOpponent(); broadcastState();
       } else if (!hitAnim) {
-        // Hit! Start knockback animation
-        g.hit = true
-        g.active = false
-        hp--
-        combo = 0
-        sharedCombo = 0
-        broadcastState()
-        if (channel) channel.send({
-          type: 'broadcast', event: 'jailbreak_combo_break',
-          payload: { fromId: myId },
-        })
-
-        // Launch player spinning upward
-        hitAnim = {
-          phase: 'spin_up',
-          timer: 0,
-          spinAngle: 0,
-          vy: -12,         // strong upward launch
-          dead: hp <= 0,
-        }
-        playerVY = 0
-        isJumping = true
+        g.hit = true; g.active = false; hp--; combo = 0; sharedCombo = 0; broadcastState();
+        if (channel) channel.send({ type: "broadcast", event: "jailbreak_combo_break", payload: { fromId: myId } });
+        hitAnim = { phase: "spin_up", timer: 0, spinAngle: 0, vy: -12, dead: hp <= 0 };
+        playerVY = 0; isJumping = true;
       }
     }
-
-    // Off screen
-    if (g.x < -40 || g.x > 340) g.active = false
+    if (g.x < -40 || g.x > 400) g.active = false;
   }
-  ghosts = ghosts.filter(g => g.active)
+  ghosts = ghosts.filter(function(g) { return g.active; });
 
-  // Win: team score reached escape threshold
-  teamScore = score
-  for (const p of Object.values(playerScores || {})) teamScore += (p?.score || 0)
-  if (teamScore >= ESCAPE_SCORE) {
-    endGame()
-    return
-  }
+  teamScore = score;
+  for (var k in playerScores) teamScore += (playerScores[k].score || 0);
+  if (teamScore >= ESCAPE_SCORE) { endGame(); return; }
+  if (elapsed >= GAME_DURATION) endGame();
 
-  // Time up
-  if (elapsed >= GAME_DURATION) {
-    endGame()
-  }
-
-  // Auto-spawn for single player (slower pace)
   if (allPlayers.length < 2 && ghosts.length === 0 && ghostCooldown <= 0) {
-    spawnGhost(true)
-    ghostCooldown = Math.max(800, 2500 - dodgeCount * 30)
+    spawnGhost(true); ghostCooldown = Math.max(800, 2500 - dodgeCount * 30);
   }
 }
 
-// ===== Render =====
 function render() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height)
-  ctx.save()
-  ctx.imageSmoothingEnabled = false
-  const dpr = window.devicePixelRatio || 1
-  const ox = (W * dpr - 320 * SC) / 2
-  const oy = (H * dpr - 180 * SC) / 2
-  ctx.translate(ox, oy)
-  ctx.scale(SC, SC)
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  var dpr = window.devicePixelRatio || 1;
+  var ox = (W * dpr - 320 * SC) / 2;
+  var oy = (H * dpr - 180 * SC) / 2;
+  ctx.translate(ox, oy);
+  ctx.scale(SC, SC);
 
-  // Background (uses DO.bg)
-  ctx.drawImage(IMG.music_rouya, 0, 0, 320, 180)
+  ctx.drawImage(IMG.music_rouya, DO.bg.x, DO.bg.y, 350, 220);
 
-  // Floor (uses DO.floor)
-  for (let x = 0; x < 320; x += IMG.floor1.width * DO.floor.s) {
-    ctx.drawImage(IMG.floor1, DO.floor.x + x, DO.floor.y, IMG.floor1.width * DO.floor.s, IMG.floor1.height * DO.floor.s)
+  var floorTileW = IMG.floor1.width * DO.floor.s;
+  var floorOffset = -(scrollX % floorTileW);
+  for (var x = floorOffset - floorTileW; x < 340; x += floorTileW) {
+    ctx.drawImage(IMG.floor1, DO.floor.x + x, DO.floor.y, floorTileW, IMG.floor1.height * DO.floor.s);
   }
 
-  const now = performance.now()
-  const elapsed = (now - gameStart) / 1000
-  const frame = Math.floor(now / 200) % 2
+  var now = performance.now();
+  var elapsed = (now - gameStart) / 1000;
+  var frame = Math.floor(now / 200) % 2;
 
-  // Door (uses DO.door)
-  teamScore = score + opponentScore
-  const escapeProgress = Math.min(teamScore / ESCAPE_SCORE, 1)
-  ctx.drawImage(escapeProgress >= 1 ? IMG.door_open : IMG.door_closed,
-    DO.door.x, DO.door.y, DO.door.w * DO.door.s, DO.door.h * DO.door.s)
+  var pImg = (hitAnim && hitAnim.phase === "buried") ? IMG.prio1 : (frame === 0 ? IMG.prio1 : IMG.prio1_2);
+  var pScale = DO.player.s;
+  var pW = pImg.width * pScale;
+  var pH = pImg.height * pScale;
+  var pDrawX = playerX;
+  var pDrawY = playerY - pH + 5;
 
-  // Player (uses DO.player for scale, playerX/playerY for position)
-  const pImg = (hitAnim && hitAnim.phase === 'buried') ? IMG.prio1 : (frame === 0 ? IMG.prio1 : IMG.prio1_2)
-  const pScale = DO.player.s
-  const pW = pImg.width * pScale
-  const pH = pImg.height * pScale
-  const pDrawX = playerX
-  const pDrawY = playerY - pH + 5
-
-  ctx.save()
-  // White outline for visibility
-  ctx.shadowColor = '#fff'
-  ctx.shadowBlur = 3
+  ctx.save();
+  ctx.shadowColor = "#fff"; ctx.shadowBlur = 3;
   if (hitAnim) {
-    const cx = pDrawX + pW / 2
-    const cy = pDrawY + pH / 2
-    ctx.translate(cx, cy)
-    ctx.rotate(hitAnim.spinAngle)
-
-    if (hitAnim.phase === 'buried') {
-      // Head stuck in ground — draw upside down, half clipped
-      ctx.drawImage(pImg, -pW / 2, -pH / 2, pW, pH)
-      // Stars around head
-      const st = performance.now() / 200
-      for (let i = 0; i < 3; i++) {
-        const sa = st + i * 2.1
-        ctx.fillStyle = '#FFD740'
-        ctx.font = '8px sans-serif'
-        ctx.fillText('⭐', Math.cos(sa) * 12 - 4, Math.sin(sa) * 8 - pH / 2)
+    var cx = pDrawX + pW / 2, cy = pDrawY + pH / 2;
+    ctx.translate(cx, cy); ctx.rotate(hitAnim.spinAngle);
+    if (hitAnim.phase === "buried") {
+      ctx.drawImage(pImg, -pW / 2, -pH / 2, pW, pH);
+      var st = performance.now() / 200;
+      for (var si = 0; si < 3; si++) {
+        var sa = st + si * 2.1;
+        ctx.fillStyle = "#FFD740"; ctx.font = "8px sans-serif";
+        ctx.fillText("\u2B50", Math.cos(sa) * 12 - 4, Math.sin(sa) * 8 - pH / 2);
       }
     } else {
-      // Spinning
-      ctx.globalAlpha = hitAnim.dead ? 0.7 : 1
-      ctx.drawImage(pImg, -pW / 2, -pH / 2, pW, pH)
-      ctx.globalAlpha = 1
+      ctx.globalAlpha = hitAnim.dead ? 0.7 : 1;
+      ctx.drawImage(pImg, -pW / 2, -pH / 2, pW, pH);
+      ctx.globalAlpha = 1;
     }
   } else {
-    ctx.translate(pDrawX + pW / 2, pDrawY + pH / 2)
-    ctx.drawImage(pImg, -pW / 2, -pH / 2, pW, pH)
+    ctx.translate(pDrawX + pW / 2, pDrawY + pH / 2);
+    ctx.drawImage(pImg, -pW / 2, -pH / 2, pW, pH);
   }
-  ctx.restore()
+  ctx.restore();
 
-  // Ghosts
-  for (const g of ghosts) {
-    if (!g.active) continue
-    const gScale = DO.ghost.s
-    ctx.save()
-    ctx.shadowColor = '#ff4444'
-    ctx.shadowBlur = 5
-    ctx.drawImage(IMG.obake, g.x - 8 * gScale, GROUND_Y - IMG.obake.height * gScale + 5, IMG.obake.width * gScale, IMG.obake.height * gScale)
-    ctx.restore()
-  }
-
-  // HP hearts
-  ctx.font = '12px sans-serif'
-  for (let i = 0; i < HP_MAX; i++) {
-    ctx.fillText(i < hp ? '❤️' : '🖤', 8 + i * 16, 20)
+  for (var gi = 0; gi < ghosts.length; gi++) {
+    var g = ghosts[gi];
+    if (!g.active) continue;
+    var gScale = DO.ghost.s;
+    ctx.save();
+    ctx.shadowColor = "#ff4444"; ctx.shadowBlur = 5;
+    ctx.drawImage(IMG.obake, g.x - 8 * gScale, GROUND_Y - IMG.obake.height * gScale + 5, IMG.obake.width * gScale, IMG.obake.height * gScale);
+    ctx.restore();
   }
 
-  // Timer bar
-  const timeLeft = Math.max(0, GAME_DURATION - elapsed)
-  ctx.fillStyle = '#333'
-  ctx.fillRect(8, 26, 120, 6)
-  ctx.fillStyle = timeLeft < 10 ? '#f44' : '#4CAF50'
-  ctx.fillRect(8, 26, (timeLeft / GAME_DURATION) * 120, 6)
+  ctx.font = "12px sans-serif";
+  for (var hi = 0; hi < HP_MAX; hi++) {
+    ctx.fillText(hi < hp ? "\u2764\uFE0F" : "\u{1F5A4}", 8 + hi * 16, 20);
+  }
 
-  // Escape meter (co-op)
-  ctx.fillStyle = '#333'
-  ctx.fillRect(140, 4, 170, 8)
-  ctx.fillStyle = escapeProgress >= 1 ? '#4CAF50' : '#FFA726'
-  ctx.fillRect(140, 4, escapeProgress * 170, 8)
-  ctx.strokeStyle = '#fff'
-  ctx.lineWidth = 0.5
-  ctx.strokeRect(140, 4, 170, 8)
-  ctx.fillStyle = '#fff'
-  ctx.font = '6px monospace'
-  ctx.textAlign = 'center'
-  ctx.fillText(`ESCAPE ${Math.floor(escapeProgress * 100)}%`, 225, 10)
+  var timeLeft = Math.max(0, GAME_DURATION - elapsed);
+  ctx.fillStyle = "#333"; ctx.fillRect(8, 26, 120, 6);
+  ctx.fillStyle = timeLeft < 10 ? "#f44" : "#4CAF50";
+  ctx.fillRect(8, 26, (timeLeft / GAME_DURATION) * 120, 6);
 
-  // My score
-  ctx.textAlign = 'right'
-  ctx.font = 'bold 9px monospace'
-  ctx.fillStyle = '#fff'
-  ctx.fillText(`MY: ${score}`, 312, 20)
-  ctx.fillText(`TEAM: ${teamScore}`, 312, 30)
+  teamScore = score + opponentScore;
+  var escapeProgress = Math.min(teamScore / ESCAPE_SCORE, 1);
+  ctx.fillStyle = "#333"; ctx.fillRect(140, 4, 170, 8);
+  ctx.fillStyle = escapeProgress >= 1 ? "#4CAF50" : "#FFA726";
+  ctx.fillRect(140, 4, escapeProgress * 170, 8);
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = 0.5; ctx.strokeRect(140, 4, 170, 8);
+  ctx.fillStyle = "#fff"; ctx.font = "6px monospace"; ctx.textAlign = "center";
+  ctx.fillText("ESCAPE " + Math.floor(escapeProgress * 100) + "%", 225, 10);
 
-  // Shared combo
+  ctx.textAlign = "right"; ctx.font = "bold 9px monospace"; ctx.fillStyle = "#fff";
+  ctx.fillText("MY: " + score, 312, 20);
+  ctx.fillText("TEAM: " + teamScore, 312, 30);
+
   if (sharedCombo > 1) {
-    ctx.fillStyle = '#FFD740'
-    ctx.font = 'bold 16px sans-serif'
-    ctx.textAlign = 'center'
-    ctx.fillText(`🔥 ${sharedCombo} RALLY!`, 160, 80)
+    ctx.fillStyle = "#FFD740"; ctx.font = "bold 16px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText("\uD83D\uDD25 " + sharedCombo + " RALLY!", 160, 80);
   }
 
-  // Teammates
-  ctx.textAlign = 'left'
-  ctx.font = '7px monospace'
-  let sy = 40
-  for (const [pid, p] of Object.entries(playerScores)) {
-    ctx.fillStyle = p.hp > 0 ? '#8f8' : '#f44'
-    ctx.fillText(`${p.name}: ${p.score}pts ${'❤️'.repeat(Math.max(0,p.hp))}`, 8, sy)
-    sy += 10
+  ctx.textAlign = "left"; ctx.font = "7px monospace";
+  var sy = 40;
+  for (var pid in playerScores) {
+    var p = playerScores[pid];
+    ctx.fillStyle = p.hp > 0 ? "#8f8" : "#f44";
+    ctx.fillText(p.name + ": " + p.score + "pts", 8, sy);
+    sy += 10;
   }
 
-  // Jump instruction
   if (elapsed < 5) {
-    ctx.textAlign = 'center'
-    ctx.fillStyle = '#FFD740'
-    ctx.font = 'bold 12px sans-serif'
-    ctx.fillText('タップ or スペースでジャンプ！', 160, 110)
+    ctx.textAlign = "center"; ctx.fillStyle = "#FFD740"; ctx.font = "bold 12px sans-serif";
+    ctx.fillText("\u30BF\u30C3\u30D7 or \u30B9\u30DA\u30FC\u30B9\u3067\u30B8\u30E3\u30F3\u30D7\uFF01", 160, 110);
   }
 
-  ctx.restore()
+  ctx.restore();
+}
+
+function renderCountdown() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  var dpr = window.devicePixelRatio || 1;
+  var ox = (W * dpr - 320 * SC) / 2;
+  var oy = (H * dpr - 180 * SC) / 2;
+  ctx.translate(ox, oy);
+  ctx.scale(SC, SC);
+
+  ctx.drawImage(IMG.music_rouya, DO.bg.x, DO.bg.y, 350, 220);
+
+  var floorTileW = IMG.floor1.width * DO.floor.s;
+  for (var x = -floorTileW; x < 340; x += floorTileW) {
+    ctx.drawImage(IMG.floor1, DO.floor.x + x, DO.floor.y, floorTileW, IMG.floor1.height * DO.floor.s);
+  }
+
+  ctx.drawImage(IMG.door_closed, DO.door.x, DO.door.y, DO.door.w * DO.door.s, DO.door.h * DO.door.s);
+
+  var frame = Math.floor(performance.now() / 200) % 2;
+  var pImg = frame === 0 ? IMG.prio1 : IMG.prio1_2;
+  var pScale = DO.player.s;
+  var pW = pImg.width * pScale;
+  var pH = pImg.height * pScale;
+  ctx.save();
+  ctx.shadowColor = "#fff"; ctx.shadowBlur = 3;
+  ctx.translate(playerX + pW / 2, (GROUND_Y - pH + 5) + pH / 2);
+  ctx.drawImage(pImg, -pW / 2, -pH / 2, pW, pH);
+  ctx.restore();
+
+  var elapsed = (performance.now() - countdownStart) / 1000;
+  var remaining = Math.ceil(3 - elapsed);
+
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  if (remaining > 0) {
+    ctx.fillStyle = "#fff"; ctx.font = "bold 48px sans-serif";
+    ctx.shadowColor = "#000"; ctx.shadowBlur = 10;
+    ctx.fillText(remaining, 160, 90);
+    ctx.shadowBlur = 0;
+  } else {
+    ctx.fillStyle = "#FFA726"; ctx.font = "bold 36px sans-serif";
+    ctx.shadowColor = "#000"; ctx.shadowBlur = 10;
+    ctx.fillText("GO!", 160, 90);
+    ctx.shadowBlur = 0;
+  }
+
+  ctx.restore();
 }
 
 function renderResult() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height)
-  ctx.save()
-  ctx.imageSmoothingEnabled = false
-  const dpr = window.devicePixelRatio || 1
-  const ox = (W * dpr - 320 * SC) / 2
-  const oy = (H * dpr - 180 * SC) / 2
-  ctx.translate(ox, oy)
-  ctx.scale(SC, SC)
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  var dpr = window.devicePixelRatio || 1;
+  var ox = (W * dpr - 320 * SC) / 2;
+  var oy = (H * dpr - 180 * SC) / 2;
+  ctx.translate(ox, oy);
+  ctx.scale(SC, SC);
 
-  teamScore = score
-  for (const p of Object.values(playerScores)) teamScore += p.score
-  const isWin = hp > 0 && teamScore >= ESCAPE_SCORE
-  ctx.drawImage(isWin ? IMG.win : IMG.lose, 0, 0, 320, 180)
+  teamScore = score;
+  for (var k in playerScores) teamScore += playerScores[k].score;
+  var isWin = hp > 0 && teamScore >= ESCAPE_SCORE;
+  ctx.drawImage(isWin ? IMG.win : IMG.lose, 0, 0, 320, 180);
 
-  ctx.textAlign = 'center'
-  ctx.fillStyle = '#fff'
-  ctx.font = 'bold 12px sans-serif'
-  ctx.fillText(`TEAM SCORE: ${teamScore}`, 160, 130)
-  ctx.font = '9px sans-serif'
-  ctx.fillText(`MY: ${score} | COMBO: ${maxCombo} | DODGE: ${dodgeCount}`, 160, 145)
-  let ry = 157
-  for (const [pid, p] of Object.entries(playerScores)) {
-    ctx.fillText(`${p.name}: ${p.score}pts`, 160, ry)
-    ry += 11
+  ctx.textAlign = "center"; ctx.fillStyle = "#fff";
+  ctx.font = "bold 12px sans-serif";
+  ctx.fillText("TEAM SCORE: " + teamScore, 160, 130);
+  ctx.font = "9px sans-serif";
+  ctx.fillText("MY: " + score + " | COMBO: " + maxCombo + " | DODGE: " + dodgeCount, 160, 145);
+  var ry = 157;
+  for (var pid in playerScores) {
+    ctx.fillText(playerScores[pid].name + ": " + playerScores[pid].score + "pts", 160, ry);
+    ry += 11;
   }
-
-  ctx.restore()
+  ctx.restore();
 }
 
-// ===== Game Flow =====
-function startGame() {
-  phase = 'playing'
-  hp = HP_MAX
-  score = 0; combo = 0; maxCombo = 0; dodgeCount = 0
-  ghostSpeed = GHOST_SPEED_INIT
-  playerY = GROUND_Y; playerVY = 0; isJumping = false
-  ghosts = []; ghostCooldown = 2500
-  gameStart = performance.now()
-
-  document.getElementById('wait-msg').style.display = 'none'
-
-  bgm = new Audio('assets/bgm.mp3')
-  bgm.loop = true
-  bgm.play().catch(() => {})
-
-  // First ghost after 2 sec
-  setTimeout(() => { if (phase === 'playing') spawnGhost(true) }, 2000)
+function startCountdown() {
+  phase = "countdown";
+  countdownStart = performance.now();
+  document.getElementById("wait-msg").style.display = "none";
+  setTimeout(function() { startPlaying(); }, 3500);
 }
+
+function startPlaying() {
+  phase = "playing";
+  hp = HP_MAX; score = 0; combo = 0; maxCombo = 0; dodgeCount = 0;
+  ghostSpeed = GHOST_SPEED_INIT;
+  playerY = GROUND_Y; playerVY = 0; isJumping = false;
+  ghosts = []; ghostCooldown = 2500; scrollX = 0;
+  gameStart = performance.now();
+  bgm = new Audio("assets/bgm.mp3");
+  bgm.loop = true; bgm.play().catch(function() {});
+  setTimeout(function() { if (phase === "playing") spawnGhost(true); }, 2000);
+}
+
+function startGame() { startCountdown(); }
 
 function endGame() {
-  phase = 'result'
-  if (bgm) { bgm.pause(); bgm = null }
-  broadcastState()
+  phase = "result";
+  if (bgm) { bgm.pause(); bgm = null; }
+  broadcastState();
 }
 
 function broadcastState() {
-  if (!channel) return
-  channel.send({
-    type: 'broadcast', event: 'jailbreak_state',
-    payload: { playerId: myId, score, hp, combo, maxCombo, dodgeCount },
-  })
+  if (!channel) return;
+  channel.send({ type: "broadcast", event: "jailbreak_state", payload: { playerId: myId, score: score, hp: hp, combo: combo, maxCombo: maxCombo, dodgeCount: dodgeCount } });
 }
 
-// ===== Main Loop =====
 function loop(ts) {
-  requestAnimationFrame(loop)
-  const dt = ts - (lastFrame || ts)
-  lastFrame = ts
-
-  if (phase === 'playing') {
-    if (!debugMode) update(dt)
-    render()
-    if (debugMode) drawDebugOverlay()
-  } else if (phase === 'result') {
-    renderResult()
-  }
+  requestAnimationFrame(loop);
+  var dt = ts - (lastFrame || ts);
+  lastFrame = ts;
+  if (phase === "countdown") { renderCountdown(); }
+  else if (phase === "playing") {
+    if (!debugMode) update(dt);
+    render();
+    if (debugMode) drawDebugOverlay();
+  } else if (phase === "result") { renderResult(); }
 }
 
-// ===== Join =====
-const roomInfo = document.getElementById('room-info')
-const nameInput = document.getElementById('name-input')
-const joinBtn = document.getElementById('join-btn')
+var roomInfo = document.getElementById("room-info");
+var nameInput = document.getElementById("name-input");
+var joinBtn = document.getElementById("join-btn");
+var hostParam = params.get("host");
 
-const hostParam = params.get('host')
-roomInfo.textContent = roomId ? `Room: ${roomId}` : 'URL に ?room=XXXX が必要'
-nameInput.addEventListener('input', () => { joinBtn.disabled = !nameInput.value.trim() })
-nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && nameInput.value.trim()) joinBtn.click() })
+roomInfo.textContent = roomId ? "Room: " + roomId : "URL に ?room=XXXX が必要";
+nameInput.addEventListener("input", function() { joinBtn.disabled = !nameInput.value.trim(); });
+nameInput.addEventListener("keydown", function(e) { if (e.key === "Enter" && nameInput.value.trim()) joinBtn.click(); });
 
-// Host auto-join
 if (hostParam && roomId) {
-  nameInput.value = decodeURIComponent(hostParam)
-  joinBtn.disabled = false
-  setTimeout(() => joinBtn.click(), 300)
+  nameInput.value = decodeURIComponent(hostParam);
+  joinBtn.disabled = false;
+  setTimeout(function() { joinBtn.click(); }, 300);
 }
 
-joinBtn.addEventListener('click', () => {
-  myId = nameInput.value.trim()
-  if (!myId || !roomId) return
-  document.getElementById('join-screen').style.display = 'none'
-  document.getElementById('wait-msg').style.display = 'flex'
+joinBtn.addEventListener("click", function() {
+  myId = nameInput.value.trim();
+  if (!myId || !roomId) return;
+  document.getElementById("join-screen").style.display = "none";
+  document.getElementById("wait-msg").style.display = "flex";
 
-  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-  channel = sb.channel(`room-${roomId}`, { config: { broadcast: { self: true } } })
+  var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  channel = sb.channel("room-" + roomId, { config: { broadcast: { self: true } } });
 
-  channel.on('broadcast', { event: 'jailbreak_ghost' }, (msg) => {
-    const d = msg?.payload ?? msg
-    // Accept if targeted at me, or if no target specified (2-player fallback)
-    if (d.fromId !== myId && phase === 'playing' && (!d.targetId || d.targetId === myId)) {
-      spawnGhost(true, d.speed || ghostSpeed)
-      if (d.combo) sharedCombo = d.combo
+  channel.on("broadcast", { event: "jailbreak_ghost" }, function(msg) {
+    var d = (msg && msg.payload) ? msg.payload : msg;
+    if (d.fromId !== myId && phase === "playing" && (!d.targetId || d.targetId === myId)) {
+      spawnGhost(true, d.speed || ghostSpeed);
+      if (d.combo) sharedCombo = d.combo;
     }
-  })
+  });
 
-  channel.on('broadcast', { event: 'jailbreak_combo_break' }, (msg) => {
-    const d = msg?.payload ?? msg
-    if (d.fromId !== myId) {
-      sharedCombo = 0 // partner missed, combo reset
-    }
-  })
+  channel.on("broadcast", { event: "jailbreak_combo_break" }, function(msg) {
+    var d = (msg && msg.payload) ? msg.payload : msg;
+    if (d.fromId !== myId) { sharedCombo = 0; }
+  });
 
-  channel.on('broadcast', { event: 'jailbreak_state' }, (msg) => {
-    const d = msg?.payload ?? msg
+  channel.on("broadcast", { event: "jailbreak_state" }, function(msg) {
+    var d = (msg && msg.payload) ? msg.payload : msg;
     if (d.playerId && d.playerId !== myId) {
-      playerScores[d.playerId] = { score: d.score || 0, hp: d.hp ?? HP_MAX, name: d.playerId }
-      // Team score = sum of all players
-      teamScore = score
-      for (const p of Object.values(playerScores)) teamScore += p.score
-      // Check if ANY teammate is dead → game over for all
-      for (const p of Object.values(playerScores)) {
-        if (p.hp <= 0 && phase === 'playing') { endGame(); return }
+      playerScores[d.playerId] = { score: d.score || 0, hp: d.hp != null ? d.hp : HP_MAX, name: d.playerId };
+      teamScore = score;
+      for (var k in playerScores) teamScore += playerScores[k].score;
+      for (var k2 in playerScores) {
+        if (playerScores[k2].hp <= 0 && phase === "playing") { endGame(); return; }
       }
     }
-  })
+  });
 
-  channel.on('broadcast', { event: 'jailbreak_start' }, () => {
-    if (phase === 'waiting') startGame()
-  })
+  channel.on("broadcast", { event: "jailbreak_start" }, function() {
+    if (phase === "waiting") startGame();
+  });
 
-  channel.on('broadcast', { event: 'jailbreak_join' }, (msg) => {
-    const d = msg?.payload ?? msg
-    if (d.playerId && !allPlayers.find(p => p.id === d.playerId)) {
-      allPlayers.push({ id: d.playerId })
+  channel.on("broadcast", { event: "jailbreak_join" }, function(msg) {
+    var d = (msg && msg.payload) ? msg.payload : msg;
+    if (d.playerId) {
+      var found = false;
+      for (var i = 0; i < allPlayers.length; i++) { if (allPlayers[i].id === d.playerId) { found = true; break; } }
+      if (!found) allPlayers.push({ id: d.playerId });
     }
-  })
+  });
 
-  channel.subscribe((status) => {
-    if (status === 'SUBSCRIBED') {
-      phase = 'waiting'
-      allPlayers.push({ id: myId })
-      channel.send({ type: 'broadcast', event: 'join', payload: { playerId: myId, name: myId } })
-      channel.send({ type: 'broadcast', event: 'jailbreak_join', payload: { playerId: myId } })
-
-      // Host auto-starts after 2 seconds (gives clients time to receive)
+  channel.subscribe(function(status) {
+    if (status === "SUBSCRIBED") {
+      phase = "waiting";
+      allPlayers.push({ id: myId });
+      channel.send({ type: "broadcast", event: "join", payload: { playerId: myId, name: myId } });
+      channel.send({ type: "broadcast", event: "jailbreak_join", payload: { playerId: myId } });
       if (hostParam) {
-        setTimeout(() => {
-          if (phase === 'waiting') {
-            channel.send({ type: 'broadcast', event: 'jailbreak_start', payload: {} })
-            startGame()
+        setTimeout(function() {
+          if (phase === "waiting") {
+            channel.send({ type: "broadcast", event: "jailbreak_start", payload: {} });
+            startGame();
           }
-        }, 2000)
+        }, 2000);
       }
     }
-  })
-})
+  });
+});
 
-// ===== Init =====
-loadImages(() => { requestAnimationFrame(loop) })
+loadImages(function() { requestAnimationFrame(loop); });
 </script>
 </body>
 </html>
