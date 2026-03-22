@@ -97,6 +97,7 @@ var hitAnim = null;
 var ghosts = [];
 var ghostSpeed = GHOST_SPEED_INIT;
 var ghostCooldown = 0;
+var hasShield = false;  // shield gift from teammate
 
 var scrollX = 0;
 var countdownStart = 0;
@@ -254,8 +255,8 @@ addEventListener("keydown", function(e) {
   if (e.key === " " || e.key === "ArrowUp" || e.key === "w") { e.preventDefault(); jump(); }
 });
 
-function spawnGhost(fromRight, speed) {
-  ghosts.push({ x: 340, speed: speed || ghostSpeed, dir: -1, active: true, hit: false });
+function spawnGhost(fromRight, speed, relayCount) {
+  ghosts.push({ x: 340, speed: speed || ghostSpeed, dir: -1, active: true, hit: false, relayCount: relayCount || 0 });
 }
 
 function sendGhostToOpponent() {
@@ -264,7 +265,10 @@ function sendGhostToOpponent() {
   for (var i = 0; i < allPlayers.length; i++) { if (allPlayers[i].id === myId) { myIdx = i; break; } }
   var nextIdx = (myIdx + 1) % allPlayers.length;
   var targetId = allPlayers.length > 1 ? allPlayers[nextIdx].id : null;
-  channel.send({ type: "broadcast", event: "jailbreak_ghost", payload: { fromId: myId, targetId: targetId, speed: ghostSpeed, combo: sharedCombo } });
+  // Find the relay count from the ghost that just exited
+  var lastRelay = 0;
+  for (var ri = 0; ri < ghosts.length; ri++) { if (ghosts[ri].dodged && ghosts[ri].relayCount) lastRelay = ghosts[ri].relayCount; }
+  channel.send({ type: "broadcast", event: "jailbreak_ghost", payload: { fromId: myId, targetId: targetId, speed: ghostSpeed, combo: sharedCombo, relayCount: lastRelay } });
   broadcastState();
 }
 
@@ -326,12 +330,29 @@ function update(dt) {
         // Dodged! Ghost keeps running through to left edge
         g.hit = true;
         g.dodged = true;
-        // Score immediately
+        var relayCount = (g.relayCount || 0) + 1;
+        g.relayCount = relayCount;
         dodgeCount++;
         ghostSpeed = GHOST_SPEED_INIT + dodgeCount * GHOST_SPEED_ACCEL;
         combo++; sharedCombo++;
         if (combo > maxCombo) maxCombo = combo;
-        score += 200 + sharedCombo * 30;
+        // Relay bonus: higher relay = more points
+        score += 200 + sharedCombo * 30 + relayCount * 50;
+        broadcastState();
+        // Shield gift: every 3 combo, send shield to next player
+        if (combo % 3 === 0 && combo > 0 && channel) {
+          var myIdx2 = -1;
+          for (var si = 0; si < allPlayers.length; si++) { if (allPlayers[si].id === myId) { myIdx2 = si; break; } }
+          var shieldTarget = allPlayers.length > 1 ? allPlayers[(myIdx2 + 1) % allPlayers.length].id : null;
+          if (shieldTarget) {
+            channel.send({ type: "broadcast", event: "jailbreak_shield", payload: { fromId: myId, targetId: shieldTarget } });
+          }
+        }
+      } else if (hasShield) {
+        // Shield absorbs hit!
+        g.hit = true; g.active = false;
+        hasShield = false;
+        combo = 0; sharedCombo = 0;
         broadcastState();
       } else if (!hitAnim) {
         g.hit = true; g.active = false; hp--; combo = 0; sharedCombo = 0; broadcastState();
@@ -466,7 +487,13 @@ function render() {
 
   if (sharedCombo > 1) {
     ctx.fillStyle = "#FFD740"; ctx.font = "bold 16px sans-serif"; ctx.textAlign = "center";
-    ctx.fillText("\uD83D\uDD25 " + sharedCombo + " RALLY!", 160, 80);
+    ctx.fillText("\uD83D\uDD25 " + sharedCombo + " RALLY!", 160, 75);
+  }
+
+  // Shield indicator
+  if (hasShield) {
+    ctx.fillStyle = "#4FC3F7"; ctx.font = "bold 14px sans-serif"; ctx.textAlign = "left";
+    ctx.fillText("\uD83D\uDEE1\uFE0F SHIELD", 8, 55);
   }
 
   ctx.textAlign = "left"; ctx.font = "7px monospace";
@@ -641,8 +668,15 @@ joinBtn.addEventListener("click", function() {
   channel.on("broadcast", { event: "jailbreak_ghost" }, function(msg) {
     var d = (msg && msg.payload) ? msg.payload : msg;
     if (d.fromId !== myId && phase === "playing" && (!d.targetId || d.targetId === myId)) {
-      spawnGhost(true, d.speed || ghostSpeed);
+      spawnGhost(true, d.speed || ghostSpeed, d.relayCount || 0);
       if (d.combo) sharedCombo = d.combo;
+    }
+  });
+
+  channel.on("broadcast", { event: "jailbreak_shield" }, function(msg) {
+    var d = (msg && msg.payload) ? msg.payload : msg;
+    if (d.targetId === myId) {
+      hasShield = true;
     }
   });
 
