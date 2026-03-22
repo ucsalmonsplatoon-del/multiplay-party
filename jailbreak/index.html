@@ -68,8 +68,8 @@ resize();
 addEventListener("resize", resize);
 
 var GROUND_Y = 178;
-var GRAVITY = 0.5;
-var JUMP_FORCE = -9;
+var GRAVITY = 0.28;
+var JUMP_FORCE = -7;
 var GHOST_SPEED_INIT = 1.3;
 var GHOST_SPEED_ACCEL = 0.02;
 var GAME_DURATION = 60;
@@ -309,7 +309,7 @@ function update(dt) {
   for (var i = 0; i < ghosts.length; i++) {
     var g = ghosts[i];
     if (!g.active) continue;
-    g.x += g.dir * g.speed;
+    g.x += g.dir * (g.speed + SCROLL_SPEED);
     var isNear = Math.abs(g.x - playerX) < 12;
     if (hitAnim) continue;
     if (isNear && !g.hit) {
