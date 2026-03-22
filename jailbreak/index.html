@@ -81,6 +81,7 @@ let allPlayers = [] // [{id, name}]
 let myIndex = -1 // 0=P1, 1=P2
 
 // Player state
+let playerX = 60
 let playerY = GROUND_Y
 let playerVY = 0
 let isJumping = false
@@ -89,6 +90,10 @@ let score = 0
 let combo = 0
 let maxCombo = 0
 let dodgeCount = 0
+
+// Hit animation state
+let hitAnim = null // { phase, timer, spinAngle, peakY, dead }
+// phase: 'spin_up' → 'fall' → 'land' (or 'buried' if dead)
 
 // Ghost state
 let ghosts = [] // [{x, speed, active}]
@@ -112,6 +117,7 @@ const playerScores = {} // id -> {score, hp, name}
 // ===== Input =====
 function jump() {
   if (phase !== 'playing') return
+  if (hitAnim) return // can't jump during hit animation
   if (!isJumping) {
     playerVY = JUMP_FORCE
     isJumping = true
@@ -163,7 +169,49 @@ function update(dt) {
 
   const elapsed = (performance.now() - gameStart) / 1000
 
-  // Player physics
+  // Hit animation physics
+  if (hitAnim) {
+    hitAnim.timer += dt
+    hitAnim.spinAngle += 0.4 // fast spin
+
+    if (hitAnim.phase === 'spin_up') {
+      hitAnim.vy += 0.15 // slow gravity during rise
+      playerY += hitAnim.vy
+      if (hitAnim.vy > 0) {
+        hitAnim.phase = 'fall'
+      }
+    } else if (hitAnim.phase === 'fall') {
+      hitAnim.vy += 0.4 // normal gravity
+      playerY += hitAnim.vy
+      if (playerY >= GROUND_Y) {
+        if (hitAnim.dead) {
+          // Head buried in ground!
+          hitAnim.phase = 'buried'
+          playerY = GROUND_Y + 10 // partially underground
+          hitAnim.spinAngle = Math.PI // upside down
+          setTimeout(() => endGame(), 1500)
+        } else {
+          // Normal landing — bounce a little
+          hitAnim.phase = 'land'
+          playerY = GROUND_Y
+          hitAnim.vy = -3 // small bounce
+        }
+      }
+    } else if (hitAnim.phase === 'land') {
+      hitAnim.vy += 0.5
+      playerY += hitAnim.vy
+      hitAnim.spinAngle *= 0.9 // slow down spin
+      if (playerY >= GROUND_Y) {
+        playerY = GROUND_Y
+        hitAnim = null // animation done, back to normal
+        isJumping = false
+      }
+    }
+    // buried phase: just stay stuck
+    return // skip normal physics during hit anim
+  }
+
+  // Normal player physics
   playerVY += GRAVITY
   playerY += playerVY
   if (playerY >= GROUND_Y) {
@@ -184,10 +232,10 @@ function update(dt) {
     if (!g.active) continue
     g.x += g.dir * g.speed
 
-    // Check collision with player (player at x=60, size ~20)
-    const playerX = 60
+    // Check collision with player (skip during hit animation)
     const ghostX = g.x
     const isNear = Math.abs(ghostX - playerX) < 15
+    if (hitAnim) continue // invincible during knockback
 
     if (isNear && !g.hit) {
       if (playerY < GROUND_Y - 10) {
@@ -196,23 +244,29 @@ function update(dt) {
         g.active = false
         sendGhostToOpponent()
         broadcastState()
-      } else {
-        // Hit! Co-op: shared combo resets
+      } else if (!hitAnim) {
+        // Hit! Start knockback animation
         g.hit = true
         g.active = false
         hp--
         combo = 0
         sharedCombo = 0
         broadcastState()
-        // Tell partner combo broke
         if (channel) channel.send({
           type: 'broadcast', event: 'jailbreak_combo_break',
           payload: { fromId: myId },
         })
-        if (hp <= 0) {
-          endGame()
-          return
+
+        // Launch player spinning upward
+        hitAnim = {
+          phase: 'spin_up',
+          timer: 0,
+          spinAngle: 0,
+          vy: -12,         // strong upward launch
+          dead: hp <= 0,
         }
+        playerVY = 0
+        isJumping = true
       }
     }
 
@@ -267,10 +321,43 @@ function render() {
   const escapeProgress = Math.min(teamScore / ESCAPE_SCORE, 1)
   ctx.drawImage(escapeProgress >= 1 ? IMG.door_open : IMG.door_closed, 285, 90, 25, 50)
 
-  // Player
-  const pImg = frame === 0 ? IMG.prio1 : IMG.prio1_2
+  // Player (with spin animation)
+  const pImg = (hitAnim && hitAnim.phase === 'buried') ? IMG.prio1 : (frame === 0 ? IMG.prio1 : IMG.prio1_2)
   const pScale = 3
-  ctx.drawImage(pImg, 50, playerY - 15 * pScale + 15, pImg.width * pScale, pImg.height * pScale)
+  const pW = pImg.width * pScale
+  const pH = pImg.height * pScale
+  const pDrawX = playerX
+  const pDrawY = playerY - pH + 15
+
+  ctx.save()
+  if (hitAnim) {
+    const cx = pDrawX + pW / 2
+    const cy = pDrawY + pH / 2
+    ctx.translate(cx, cy)
+    ctx.rotate(hitAnim.spinAngle)
+
+    if (hitAnim.phase === 'buried') {
+      // Head stuck in ground — draw upside down, half clipped
+      ctx.drawImage(pImg, -pW / 2, -pH / 2, pW, pH)
+      // Stars around head
+      const st = performance.now() / 200
+      for (let i = 0; i < 3; i++) {
+        const sa = st + i * 2.1
+        ctx.fillStyle = '#FFD740'
+        ctx.font = '8px sans-serif'
+        ctx.fillText('⭐', Math.cos(sa) * 12 - 4, Math.sin(sa) * 8 - pH / 2)
+      }
+    } else {
+      // Spinning
+      ctx.globalAlpha = hitAnim.dead ? 0.7 : 1
+      ctx.drawImage(pImg, -pW / 2, -pH / 2, pW, pH)
+      ctx.globalAlpha = 1
+    }
+  } else {
+    ctx.translate(pDrawX + pW / 2, pDrawY + pH / 2)
+    ctx.drawImage(pImg, -pW / 2, -pH / 2, pW, pH)
+  }
+  ctx.restore()
 
   // Ghosts
   for (const g of ghosts) {
