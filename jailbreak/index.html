@@ -509,9 +509,16 @@ const roomInfo = document.getElementById('room-info')
 const nameInput = document.getElementById('name-input')
 const joinBtn = document.getElementById('join-btn')
 
+const hostParam = params.get('host')
 roomInfo.textContent = roomId ? `Room: ${roomId}` : 'URL に ?room=XXXX が必要'
 nameInput.addEventListener('input', () => { joinBtn.disabled = !nameInput.value.trim() })
 nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && nameInput.value.trim()) joinBtn.click() })
+
+// Host auto-join
+if (hostParam && roomId) {
+  nameInput.value = hostParam
+  setTimeout(() => joinBtn.click(), 500)
+}
 
 joinBtn.addEventListener('click', () => {
   myId = nameInput.value.trim()
@@ -567,9 +574,18 @@ joinBtn.addEventListener('click', () => {
     if (status === 'SUBSCRIBED') {
       phase = 'waiting'
       allPlayers.push({ id: myId })
-      // Send standard 'join' for host to detect, plus game-specific join
       channel.send({ type: 'broadcast', event: 'join', payload: { playerId: myId, name: myId } })
       channel.send({ type: 'broadcast', event: 'jailbreak_join', payload: { playerId: myId } })
+
+      // Host auto-starts after 2 seconds (gives clients time to receive)
+      if (hostParam) {
+        setTimeout(() => {
+          if (phase === 'waiting') {
+            channel.send({ type: 'broadcast', event: 'jailbreak_start', payload: {} })
+            startGame()
+          }
+        }, 2000)
+      }
     }
   })
 })
