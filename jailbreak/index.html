@@ -109,6 +109,64 @@ let bgm = null
 let lastFrame = 0
 let animFrame = 0
 
+// ===== Debug Mode =====
+let debugMode = false
+let debugObjects = [] // {name, x, y, w, h, scaleX, scaleY, selected}
+let debugSelected = null
+let debugDragging = false
+let debugDragOff = {x:0, y:0}
+
+function initDebugObjects() {
+  debugObjects = [
+    { name: 'player', x: playerX, y: GROUND_Y, w: 15, h: 15, s: 5 },
+    { name: 'background', x: 0, y: 0, w: 320, h: 180, s: 1 },
+    { name: 'floor', x: 0, y: 152, w: 320, h: 20, s: 1 },
+    { name: 'door', x: 285, y: 90, w: 25, h: 50, s: 1 },
+    { name: 'ghost_spawn', x: 280, y: GROUND_Y, w: 20, h: 20, s: 4 },
+  ]
+}
+
+function drawDebugOverlay() {
+  ctx.save()
+  const dpr = window.devicePixelRatio || 1
+  const ox = (W * dpr - 320 * SC) / 2
+  const oy = (H * dpr - 180 * SC) / 2
+  ctx.translate(ox, oy)
+  ctx.scale(SC, SC)
+
+  // Draw bounding boxes for all objects
+  for (const obj of debugObjects) {
+    const sel = obj === debugSelected
+    ctx.strokeStyle = sel ? '#0f0' : '#ff0'
+    ctx.lineWidth = sel ? 1.5 : 0.5
+    ctx.setLineDash(sel ? [] : [3, 3])
+    ctx.strokeRect(obj.x, obj.y - obj.h * obj.s, obj.w * obj.s, obj.h * obj.s)
+
+    // Label
+    ctx.fillStyle = sel ? '#0f0' : '#ff0'
+    ctx.font = '6px monospace'
+    ctx.fillText(`${obj.name} (${Math.round(obj.x)},${Math.round(obj.y)}) s=${obj.s.toFixed(1)}`, obj.x, obj.y - obj.h * obj.s - 2)
+  }
+  ctx.setLineDash([])
+
+  // Debug panel
+  ctx.fillStyle = 'rgba(0,0,0,0.8)'
+  ctx.fillRect(0, 0, 160, 50)
+  ctx.fillStyle = '#0f0'
+  ctx.font = 'bold 7px monospace'
+  ctx.fillText('DEBUG MODE [D=toggle]', 4, 8)
+  ctx.fillText('[Click=select] [Drag=move]', 4, 16)
+  ctx.fillText('[+/-=scale] [Arrow=nudge]', 4, 24)
+  if (debugSelected) {
+    ctx.fillStyle = '#ff0'
+    ctx.fillText(`Selected: ${debugSelected.name}`, 4, 34)
+    ctx.fillText(`x=${Math.round(debugSelected.x)} y=${Math.round(debugSelected.y)} s=${debugSelected.s.toFixed(1)}`, 4, 42)
+  }
+
+  ctx.restore()
+}
+
+
 // Opponent state (received via broadcast)
 let opponentScore = 0
 let opponentHP = HP_MAX
@@ -127,8 +185,63 @@ function jump() {
   }
 }
 
-canvas.addEventListener('pointerdown', (e) => { e.preventDefault(); jump() })
+canvas.addEventListener('pointerdown', (e) => {
+  e.preventDefault()
+  if (debugMode) {
+    const dpr = window.devicePixelRatio || 1
+    const ox = (W * dpr - 320 * SC) / 2
+    const oy = (H * dpr - 180 * SC) / 2
+    const mx = (e.clientX * dpr - ox) / SC
+    const my = (e.clientY * dpr - oy) / SC
+
+    debugSelected = null
+    for (const obj of debugObjects) {
+      const bx = obj.x, by = obj.y - obj.h * obj.s
+      const bw = obj.w * obj.s, bh = obj.h * obj.s
+      if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
+        debugSelected = obj
+        debugDragging = true
+        debugDragOff = { x: mx - obj.x, y: my - obj.y }
+        break
+      }
+    }
+    return
+  }
+  jump()
+})
+canvas.addEventListener('pointermove', (e) => {
+  if (!debugMode || !debugDragging || !debugSelected) return
+  const dpr = window.devicePixelRatio || 1
+  const ox = (W * dpr - 320 * SC) / 2
+  const oy = (H * dpr - 180 * SC) / 2
+  debugSelected.x = (e.clientX * dpr - ox) / SC - debugDragOff.x
+  debugSelected.y = (e.clientY * dpr - oy) / SC - debugDragOff.y
+  if (debugSelected.name === 'player') playerX = debugSelected.x
+})
+canvas.addEventListener('pointerup', () => { debugDragging = false })
 addEventListener('keydown', (e) => {
+  if (e.key === 'd' && !debugMode) {
+    debugMode = true; initDebugObjects(); return
+  } else if (e.key === 'd' && debugMode) {
+    debugMode = false; debugSelected = null; return
+  }
+
+  if (debugMode && debugSelected) {
+    const step = e.shiftKey ? 5 : 1
+    if (e.key === 'ArrowLeft') { debugSelected.x -= step; e.preventDefault() }
+    if (e.key === 'ArrowRight') { debugSelected.x += step; e.preventDefault() }
+    if (e.key === 'ArrowUp') { debugSelected.y -= step; e.preventDefault() }
+    if (e.key === 'ArrowDown') { debugSelected.y += step; e.preventDefault() }
+    if (e.key === '=' || e.key === '+') { debugSelected.s = Math.round((debugSelected.s + 0.5) * 10) / 10 }
+    if (e.key === '-') { debugSelected.s = Math.max(0.5, Math.round((debugSelected.s - 0.5) * 10) / 10) }
+    // Apply to game
+    if (debugSelected.name === 'player') { playerX = debugSelected.x }
+    if (debugSelected.name === 'ghost_spawn') { /* just visual */ }
+    // Log for copying values
+    console.log(`[DEBUG] ${debugSelected.name}: x=${debugSelected.x}, y=${debugSelected.y}, s=${debugSelected.s}`)
+    return
+  }
+
   if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'w') { e.preventDefault(); jump() }
 })
 
@@ -511,8 +624,9 @@ function loop(ts) {
   lastFrame = ts
 
   if (phase === 'playing') {
-    update(dt)
+    if (!debugMode) update(dt)
     render()
+    if (debugMode) drawDebugOverlay()
   } else if (phase === 'result') {
     renderResult()
   }
