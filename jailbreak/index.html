@@ -110,20 +110,59 @@ let lastFrame = 0
 let animFrame = 0
 
 // ===== Debug Mode =====
-let debugMode = false
-let debugObjects = [] // {name, x, y, w, h, scaleX, scaleY, selected}
+let debugMode = params.has('debug')
 let debugSelected = null
 let debugDragging = false
 let debugDragOff = {x:0, y:0}
 
-function initDebugObjects() {
-  debugObjects = [
-    { name: 'player', x: playerX, y: GROUND_Y, w: 15, h: 15, s: 5 },
-    { name: 'background', x: 0, y: 0, w: 320, h: 180, s: 1 },
-    { name: 'floor', x: 0, y: 152, w: 320, h: 20, s: 1 },
-    { name: 'door', x: 285, y: 90, w: 25, h: 50, s: 1 },
-    { name: 'ghost_spawn', x: 280, y: GROUND_Y, w: 20, h: 20, s: 4 },
-  ]
+// All drawable objects with position/scale — render() reads these
+const DO = {
+  bg:    { name: 'bg',    x: 0,   y: 0,   w: 320, h: 180, s: 1 },
+  floor: { name: 'floor', x: 0,   y: 152, w: 320, h: 20,  s: 1 },
+  door:  { name: 'door',  x: 285, y: 90,  w: 25,  h: 50,  s: 1 },
+  player:{ name: 'player', x: 60, y: 130, w: 15,  h: 15,  s: 5 },
+  ghost: { name: 'ghost',  x: 280, y: 130, w: 16, h: 16,  s: 4 },
+}
+const debugObjects = Object.values(DO)
+
+if (debugMode) {
+  // Show debug button overlay for iPad
+  const dbtn = document.createElement('button')
+  dbtn.textContent = '📋 Copy Layout'
+  dbtn.style.cssText = 'position:fixed;top:8px;right:8px;z-index:200;padding:8px 12px;border:none;border-radius:8px;background:#0a0;color:#fff;font-size:13px;cursor:pointer;'
+  dbtn.addEventListener('click', () => {
+    const data = {}
+    for (const o of debugObjects) data[o.name] = { x: o.x, y: o.y, s: o.s }
+    const text = JSON.stringify(data, null, 2)
+    navigator.clipboard.writeText(text).then(() => dbtn.textContent = '✅ Copied!')
+    .catch(() => { prompt('Copy:', text) })
+    setTimeout(() => dbtn.textContent = '📋 Copy Layout', 2000)
+  })
+  document.body.appendChild(dbtn)
+
+  // Toggle button for iPad (no keyboard)
+  const toggleBtn = document.createElement('button')
+  toggleBtn.textContent = '🔧 Debug OFF'
+  toggleBtn.style.cssText = 'position:fixed;top:8px;left:8px;z-index:200;padding:8px 12px;border:none;border-radius:8px;background:#333;color:#fff;font-size:13px;cursor:pointer;'
+  toggleBtn.addEventListener('click', () => {
+    debugMode = !debugMode
+    toggleBtn.textContent = debugMode ? '🔧 Debug OFF' : '🔧 Debug ON'
+    debugSelected = null
+  })
+  document.body.appendChild(toggleBtn)
+
+  // Scale buttons for iPad
+  const scaleUp = document.createElement('button')
+  scaleUp.textContent = '➕ Scale'
+  scaleUp.style.cssText = 'position:fixed;bottom:50px;right:8px;z-index:200;padding:8px;border:none;border-radius:8px;background:#555;color:#fff;font-size:13px;cursor:pointer;'
+  scaleUp.addEventListener('click', () => { if (debugSelected) { debugSelected.s = Math.round((debugSelected.s + 0.5) * 10) / 10 } })
+  document.body.appendChild(scaleUp)
+
+  const scaleDown = document.createElement('button')
+  scaleDown.textContent = '➖ Scale'
+  scaleDown.style.cssText = 'position:fixed;bottom:90px;right:8px;z-index:200;padding:8px;border:none;border-radius:8px;background:#555;color:#fff;font-size:13px;cursor:pointer;'
+  scaleDown.addEventListener('click', () => { if (debugSelected) { debugSelected.s = Math.max(0.5, Math.round((debugSelected.s - 0.5) * 10) / 10) } })
+  document.body.appendChild(scaleDown)
 }
 
 function drawDebugOverlay() {
@@ -223,15 +262,13 @@ canvas.addEventListener('pointermove', (e) => {
   const m = screenToGame(e.clientX, e.clientY)
   debugSelected.x = Math.round(m.x - debugDragOff.x)
   debugSelected.y = Math.round(m.y - debugDragOff.y)
-  if (debugSelected.name === 'player') playerX = debugSelected.x
+  if (debugSelected.name === 'player') { playerX = debugSelected.x; playerY = debugSelected.y }
   console.log(`[DEBUG] ${debugSelected.name}: x=${debugSelected.x}, y=${debugSelected.y}, s=${debugSelected.s}`)
 })
 canvas.addEventListener('pointerup', () => { debugDragging = false })
 addEventListener('keydown', (e) => {
-  if (e.key === 'd' && !debugMode) {
-    debugMode = true; initDebugObjects(); return
-  } else if (e.key === 'd' && debugMode) {
-    debugMode = false; debugSelected = null; return
+  if (e.key === 'd') {
+    debugMode = !debugMode; debugSelected = null; return
   }
 
   if (debugMode && debugSelected) {
@@ -243,8 +280,7 @@ addEventListener('keydown', (e) => {
     if (e.key === '=' || e.key === '+') { debugSelected.s = Math.round((debugSelected.s + 0.5) * 10) / 10 }
     if (e.key === '-') { debugSelected.s = Math.max(0.5, Math.round((debugSelected.s - 0.5) * 10) / 10) }
     // Apply to game
-    if (debugSelected.name === 'player') { playerX = debugSelected.x }
-    if (debugSelected.name === 'ghost_spawn') { /* just visual */ }
+    if (debugSelected.name === 'player') { playerX = debugSelected.x; playerY = debugSelected.y }
     // Log for copying values
     console.log(`[DEBUG] ${debugSelected.name}: x=${debugSelected.x}, y=${debugSelected.y}, s=${debugSelected.s}`)
     return
@@ -430,26 +466,27 @@ function render() {
   ctx.translate(ox, oy)
   ctx.scale(SC, SC)
 
-  // Background
-  ctx.drawImage(IMG.music_rouya, 0, 0, 320, 180)
+  // Background (uses DO.bg)
+  ctx.drawImage(IMG.music_rouya, DO.bg.x, DO.bg.y, 320 * DO.bg.s, 180 * DO.bg.s)
 
-  // Floor
-  for (let x = 0; x < 320; x += IMG.floor1.width) {
-    ctx.drawImage(IMG.floor1, x, 152)
+  // Floor (uses DO.floor)
+  for (let x = 0; x < 320; x += IMG.floor1.width * DO.floor.s) {
+    ctx.drawImage(IMG.floor1, DO.floor.x + x, DO.floor.y, IMG.floor1.width * DO.floor.s, IMG.floor1.height * DO.floor.s)
   }
 
   const now = performance.now()
   const elapsed = (now - gameStart) / 1000
   const frame = Math.floor(now / 200) % 2
 
-  // Door + escape meter (co-op: team score fills meter)
+  // Door (uses DO.door)
   teamScore = score + opponentScore
   const escapeProgress = Math.min(teamScore / ESCAPE_SCORE, 1)
-  ctx.drawImage(escapeProgress >= 1 ? IMG.door_open : IMG.door_closed, 285, 90, 25, 50)
+  ctx.drawImage(escapeProgress >= 1 ? IMG.door_open : IMG.door_closed,
+    DO.door.x, DO.door.y, DO.door.w * DO.door.s, DO.door.h * DO.door.s)
 
-  // Player (with spin animation)
+  // Player (uses DO.player for scale, playerX/playerY for position)
   const pImg = (hitAnim && hitAnim.phase === 'buried') ? IMG.prio1 : (frame === 0 ? IMG.prio1 : IMG.prio1_2)
-  const pScale = 5
+  const pScale = DO.player.s
   const pW = pImg.width * pScale
   const pH = pImg.height * pScale
   const pDrawX = playerX
@@ -491,7 +528,7 @@ function render() {
   // Ghosts
   for (const g of ghosts) {
     if (!g.active) continue
-    const gScale = 4
+    const gScale = DO.ghost.s
     ctx.save()
     ctx.shadowColor = '#ff4444'
     ctx.shadowBlur = 5
