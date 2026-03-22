@@ -198,6 +198,8 @@ var playerScores = {};
 function jump() {
   if (phase !== "playing") return;
   if (hitAnim) return;
+  // Resume BGM on first user interaction (autoplay policy workaround)
+  if (bgm && bgm.paused) bgm.play().catch(function() {});
   if (!isJumping) { playerVY = JUMP_FORCE; isJumping = true; }
 }
 
