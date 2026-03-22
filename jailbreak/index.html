@@ -346,17 +346,24 @@ function render() {
   ctx.translate(ox, oy);
   ctx.scale(SC, SC);
 
-  // Solid background fill (never moves)
-  ctx.fillStyle = "#3a3a50";
+  // Sky/outside background (revealed as jail scrolls away)
+  var grad = ctx.createLinearGradient(0, 0, 0, DO.floor.y);
+  grad.addColorStop(0, "#87CEEB");
+  grad.addColorStop(0.7, "#B0E0E6");
+  grad.addColorStop(1, "#90EE90");
+  ctx.fillStyle = grad;
   ctx.fillRect(-20, -30, 360, 240);
 
-  // Jail wall image (fixed at constant position, NOT using DO.bg which can be dragged)
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(0, 0, 320, DO.floor.y);
-  ctx.clip();
-  ctx.drawImage(IMG.music_rouya, -13, -21, 350, 220);
-  ctx.restore();
+  // Jail cell scrolls away to the left (escape!)
+  var jailX = -13 - scrollX * 0.3;
+  if (jailX > -400) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, 320, DO.floor.y);
+    ctx.clip();
+    ctx.drawImage(IMG.music_rouya, jailX, -21, 350, 220);
+    ctx.restore();
+  }
 
   // Floor tiles (infinite scroll)
   var floorTileW = IMG.floor1.width * DO.floor.s;
@@ -465,14 +472,10 @@ function renderCountdown() {
   ctx.translate(ox, oy);
   ctx.scale(SC, SC);
 
+  // Countdown: still in jail (no scroll)
   ctx.fillStyle = "#3a3a50";
   ctx.fillRect(-20, -30, 360, 240);
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(0, 0, 320, DO.floor.y);
-  ctx.clip();
   ctx.drawImage(IMG.music_rouya, -13, -21, 350, 220);
-  ctx.restore();
 
   var floorTileW = IMG.floor1.width * DO.floor.s;
   for (var x = -floorTileW; x < 340; x += floorTileW) {
