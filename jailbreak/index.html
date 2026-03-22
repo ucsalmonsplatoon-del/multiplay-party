@@ -355,7 +355,7 @@ function render() {
   ctx.fillRect(-20, -30, 360, 240);
 
   // Jail cell scrolls away to the left (escape!)
-  var jailX = -13 - scrollX * 0.8;
+  var jailX = -13 - scrollX;
   if (jailX > -400) {
     ctx.save();
     ctx.beginPath();
