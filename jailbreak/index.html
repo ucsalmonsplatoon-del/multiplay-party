@@ -346,20 +346,17 @@ function render() {
   ctx.translate(ox, oy);
   ctx.scale(SC, SC);
 
-  // Background (fixed, never scrolls) — only show above floor line
+  // Solid background fill (never moves)
+  ctx.fillStyle = "#3a3a50";
+  ctx.fillRect(-20, -30, 360, 240);
+
+  // Jail wall image (fixed at constant position, NOT using DO.bg which can be dragged)
   ctx.save();
   ctx.beginPath();
-  ctx.rect(-20, -30, 360, DO.floor.y + 10);
+  ctx.rect(0, 0, 320, DO.floor.y);
   ctx.clip();
-  // Draw bg at fixed position, ignoring scrollX completely
-  var bgX = DO.bg.x;
-  var bgY = DO.bg.y;
-  ctx.drawImage(IMG.music_rouya, bgX, bgY, 350, 220);
+  ctx.drawImage(IMG.music_rouya, -13, -21, 350, 220);
   ctx.restore();
-
-  // Fill below bg with solid color (floor area background)
-  ctx.fillStyle = "#3a3a50";
-  ctx.fillRect(-20, DO.floor.y - 2, 360, 40);
 
   // Floor tiles (infinite scroll)
   var floorTileW = IMG.floor1.width * DO.floor.s;
@@ -468,11 +465,13 @@ function renderCountdown() {
   ctx.translate(ox, oy);
   ctx.scale(SC, SC);
 
+  ctx.fillStyle = "#3a3a50";
+  ctx.fillRect(-20, -30, 360, 240);
   ctx.save();
   ctx.beginPath();
-  ctx.rect(-20, -30, 360, DO.floor.y + 30);
+  ctx.rect(0, 0, 320, DO.floor.y);
   ctx.clip();
-  ctx.drawImage(IMG.music_rouya, DO.bg.x, DO.bg.y, 350, 220);
+  ctx.drawImage(IMG.music_rouya, -13, -21, 350, 220);
   ctx.restore();
 
   var floorTileW = IMG.floor1.width * DO.floor.s;
