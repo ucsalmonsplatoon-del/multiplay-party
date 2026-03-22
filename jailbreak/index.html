@@ -516,8 +516,9 @@ nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && nameInpu
 
 // Host auto-join
 if (hostParam && roomId) {
-  nameInput.value = hostParam
-  setTimeout(() => joinBtn.click(), 500)
+  nameInput.value = decodeURIComponent(hostParam)
+  joinBtn.disabled = false
+  setTimeout(() => joinBtn.click(), 300)
 }
 
 joinBtn.addEventListener('click', () => {
