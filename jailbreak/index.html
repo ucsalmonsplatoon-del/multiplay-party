@@ -395,7 +395,12 @@ function render() {
   var elapsed = (now - gameStart) / 1000;
   var frame = Math.floor(now / 200) % 2;
 
-  var pImg = (hitAnim && hitAnim.phase === "buried") ? IMG.prio1 : (frame === 0 ? IMG.prio1 : IMG.prio1_2);
+  var myPlayerIdx = 0;
+  for (var pi = 0; pi < allPlayers.length; pi++) { if (allPlayers[pi].id === myId) { myPlayerIdx = pi; break; } }
+  var isP2 = myPlayerIdx >= 1;
+  var pImg = isP2
+    ? ((hitAnim && hitAnim.phase === "buried") ? IMG.pri2 : (frame === 0 ? IMG.pri2 : IMG.pri2_2))
+    : ((hitAnim && hitAnim.phase === "buried") ? IMG.prio1 : (frame === 0 ? IMG.prio1 : IMG.prio1_2));
   var pScale = DO.player.s;
   var pW = pImg.width * pScale;
   var pH = pImg.height * pScale;
@@ -504,7 +509,11 @@ function renderCountdown() {
   ctx.drawImage(IMG.door_closed, DO.door.x, DO.door.y, DO.door.w * DO.door.s, DO.door.h * DO.door.s);
 
   var frame = Math.floor(performance.now() / 200) % 2;
-  var pImg = frame === 0 ? IMG.prio1 : IMG.prio1_2;
+  var cdPlayerIdx = 0;
+  for (var ci = 0; ci < allPlayers.length; ci++) { if (allPlayers[ci].id === myId) { cdPlayerIdx = ci; break; } }
+  var pImg = cdPlayerIdx >= 1
+    ? (frame === 0 ? IMG.pri2 : IMG.pri2_2)
+    : (frame === 0 ? IMG.prio1 : IMG.prio1_2);
   var pScale = DO.player.s;
   var pW = pImg.width * pScale;
   var pH = pImg.height * pScale;
