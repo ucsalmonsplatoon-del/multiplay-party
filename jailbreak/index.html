@@ -67,7 +67,7 @@ resize()
 addEventListener('resize', resize)
 
 // ===== Game Constants =====
-const GROUND_Y = 130
+const GROUND_Y = 178
 const GRAVITY = 0.5
 const JUMP_FORCE = -9
 const GHOST_SPEED_INIT = 1.3
@@ -84,7 +84,7 @@ let allPlayers = [] // [{id, name}]
 let myIndex = -1 // 0=P1, 1=P2
 
 // Player state
-let playerX = 60
+let playerX = 104
 let playerY = GROUND_Y
 let playerVY = 0
 let isJumping = false
@@ -118,10 +118,10 @@ let debugDragOff = {x:0, y:0}
 // All drawable objects with position/scale — render() reads these
 const DO = {
   bg:    { name: 'bg',    x: 0,   y: 0,   w: 320, h: 180, s: 1 },
-  floor: { name: 'floor', x: 0,   y: 152, w: 320, h: 20,  s: 1 },
+  floor: { name: 'floor', x: -2,  y: 181, w: 320, h: 20,  s: 2.5 },
   door:  { name: 'door',  x: 285, y: 90,  w: 25,  h: 50,  s: 1 },
-  player:{ name: 'player', x: 60, y: 130, w: 15,  h: 15,  s: 5 },
-  ghost: { name: 'ghost',  x: 280, y: 130, w: 16, h: 16,  s: 4 },
+  player:{ name: 'player', x: 104, y: 178, w: 15,  h: 15,  s: 2.5 },
+  ghost: { name: 'ghost',  x: 280, y: 178, w: 16, h: 16,  s: 2.5 },
 }
 const debugObjects = Object.values(DO)
 
@@ -467,7 +467,7 @@ function render() {
   ctx.scale(SC, SC)
 
   // Background (uses DO.bg)
-  ctx.drawImage(IMG.music_rouya, DO.bg.x, DO.bg.y, 320 * DO.bg.s, 180 * DO.bg.s)
+  ctx.drawImage(IMG.music_rouya, 0, 0, 320, 180)
 
   // Floor (uses DO.floor)
   for (let x = 0; x < 320; x += IMG.floor1.width * DO.floor.s) {
