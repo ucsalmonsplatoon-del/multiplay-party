@@ -200,11 +200,15 @@ canvas.addEventListener('pointerdown', (e) => {
   if (debugMode) {
     const m = screenToGame(e.clientX, e.clientY)
     debugSelected = null
-    // Select closest object within 30px
-    let bestDist = 30
+    // Select object whose bounding box contains the click (smallest first)
+    let bestArea = Infinity
     for (const obj of debugObjects) {
-      const dist = Math.abs(m.x - obj.x) + Math.abs(m.y - obj.y)
-      if (dist < bestDist) { bestDist = dist; debugSelected = obj }
+      const bw = obj.w * obj.s, bh = obj.h * obj.s
+      const bx = obj.x, by = obj.y - bh
+      if (m.x >= bx && m.x <= bx + bw && m.y >= by && m.y <= by + bh) {
+        const area = bw * bh
+        if (area < bestArea) { bestArea = area; debugSelected = obj }
+      }
     }
     if (debugSelected) {
       debugDragging = true
