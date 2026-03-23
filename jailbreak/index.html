@@ -99,6 +99,9 @@ var ghostSpeed = GHOST_SPEED_INIT;
 var ghostCooldown = 0;
 var hasShield = false;  // shield gift from teammate
 
+// Teammate visual state (for mini-views)
+var teammateViews = {}; // playerId -> { playerY, ghosts:[{x}], hp, combo, name, isP2, lastUpdate }
+
 var scrollX = 0;
 var countdownStart = 0;
 var gameStart = 0;
@@ -374,6 +377,9 @@ function update(dt) {
   if (allPlayers.length < 2 && ghosts.length === 0 && ghostCooldown <= 0) {
     spawnGhost(true); ghostCooldown = Math.max(800, 2500 - dodgeCount * 30);
   }
+
+  // Send visual state for teammate mini-views
+  broadcastVisual();
 }
 
 function render() {
@@ -511,6 +517,101 @@ function render() {
   }
 
   ctx.restore();
+
+  // ===== Teammate Mini-Views =====
+  var tmIds = Object.keys(teammateViews);
+  if (tmIds.length > 0) {
+    var dpr2 = window.devicePixelRatio || 1;
+    var miniH = Math.floor(H * dpr2 * 0.18); // 18% of screen height
+    var miniW = Math.floor(W * dpr2 * 0.9);
+    var miniSC = miniH / 180;
+
+    for (var ti = 0; ti < tmIds.length && ti < 2; ti++) {
+      var tm = teammateViews[tmIds[ti]];
+      var miniY = ti === 0 ? 4 : (H * dpr2 - miniH - 4); // top or bottom
+
+      ctx.save();
+      ctx.globalAlpha = 0.85;
+
+      // Mini background
+      ctx.fillStyle = "#1a1a2e";
+      ctx.fillRect((W * dpr2 - miniW) / 2, miniY, miniW, miniH);
+      ctx.strokeStyle = tm.hp > 0 ? "#4FC3F7" : "#f44";
+      ctx.lineWidth = 1;
+      ctx.strokeRect((W * dpr2 - miniW) / 2, miniY, miniW, miniH);
+
+      // Clip to mini area
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect((W * dpr2 - miniW) / 2, miniY, miniW, miniH);
+      ctx.clip();
+
+      var mox = (W * dpr2 - miniW) / 2;
+      ctx.translate(mox, miniY);
+      ctx.scale(miniSC, miniSC);
+      ctx.imageSmoothingEnabled = false;
+
+      // Mini floor
+      ctx.fillStyle = "#3a3a50";
+      ctx.fillRect(0, 0, 320, 180);
+      var mFloorTileW = IMG.floor1.width * DO.floor.s;
+      for (var mfx = 0; mfx < 340; mfx += mFloorTileW) {
+        ctx.drawImage(IMG.floor1, mfx, DO.floor.y, mFloorTileW, IMG.floor1.height * DO.floor.s);
+      }
+
+      // Mini player character
+      var mFrame = Math.floor(performance.now() / 200) % 2;
+      var mPimg = tm.isP2
+        ? (mFrame === 0 ? IMG.pri2 : IMG.pri2_2)
+        : (mFrame === 0 ? IMG.prio1 : IMG.prio1_2);
+      var mPS = DO.player.s;
+      var mPW = mPimg.width * mPS;
+      var mPH = mPimg.height * mPS;
+      var mPY = (tm.playerY || GROUND_Y) - mPH + 5;
+
+      if (tm.hitAnim === "spin_up" || tm.hitAnim === "fall") {
+        ctx.save();
+        ctx.translate(playerX + mPW/2, mPY + mPH/2);
+        ctx.rotate(performance.now() / 100);
+        ctx.drawImage(mPimg, -mPW/2, -mPH/2, mPW, mPH);
+        ctx.restore();
+      } else if (tm.hitAnim === "buried") {
+        ctx.save();
+        ctx.translate(playerX + mPW/2, GROUND_Y + mPH/2);
+        ctx.rotate(Math.PI);
+        ctx.drawImage(mPimg, -mPW/2, -mPH/2, mPW, mPH);
+        ctx.restore();
+      } else {
+        ctx.drawImage(mPimg, playerX, mPY, mPW, mPH);
+      }
+
+      // Mini ghosts
+      var mGS = DO.ghost.s;
+      for (var mgi = 0; mgi < tm.ghostXs.length; mgi++) {
+        ctx.drawImage(IMG.obake, tm.ghostXs[mgi] - 8*mGS, GROUND_Y - IMG.obake.height*mGS + 5, IMG.obake.width*mGS, IMG.obake.height*mGS);
+      }
+
+      // Mini HP
+      ctx.font = "10px sans-serif";
+      for (var mhi = 0; mhi < HP_MAX; mhi++) {
+        ctx.fillText(mhi < tm.hp ? "\u2764\uFE0F" : "\u{1F5A4}", 4 + mhi * 12, 15);
+      }
+
+      // Name + shield
+      ctx.fillStyle = "#fff"; ctx.font = "bold 8px sans-serif"; ctx.textAlign = "right";
+      ctx.fillText(tm.name + (tm.hasShield ? " \uD83D\uDEE1" : ""), 316, 15);
+
+      // Combo
+      if (tm.combo > 1) {
+        ctx.fillStyle = "#FFD740"; ctx.font = "bold 10px sans-serif"; ctx.textAlign = "center";
+        ctx.fillText(tm.combo + " COMBO", 160, 90);
+      }
+
+      ctx.restore(); // clip
+      ctx.globalAlpha = 1;
+      ctx.restore(); // save
+    }
+  }
 }
 
 function renderCountdown() {
@@ -624,9 +725,25 @@ function endGame() {
   broadcastState();
 }
 
+var lastVisualBroadcast = 0;
 function broadcastState() {
   if (!channel) return;
   channel.send({ type: "broadcast", event: "jailbreak_state", payload: { playerId: myId, score: score, hp: hp, combo: combo, maxCombo: maxCombo, dodgeCount: dodgeCount } });
+}
+// Send visual state for teammate mini-views (throttled)
+function broadcastVisual() {
+  if (!channel) return;
+  var now = performance.now();
+  if (now - lastVisualBroadcast < 100) return; // max 10fps
+  lastVisualBroadcast = now;
+  var ghostXs = [];
+  for (var i = 0; i < ghosts.length; i++) { if (ghosts[i].active) ghostXs.push(ghosts[i].x); }
+  var myIdx3 = 0;
+  for (var j = 0; j < allPlayers.length; j++) { if (allPlayers[j].id === myId) { myIdx3 = j; break; } }
+  channel.send({ type: "broadcast", event: "jailbreak_visual", payload: {
+    playerId: myId, playerY: playerY, ghostXs: ghostXs, hp: hp, combo: combo,
+    hasShield: hasShield, isP2: myIdx3 >= 1, hitAnim: hitAnim ? hitAnim.phase : null
+  }});
 }
 
 function loop(ts) {
@@ -670,6 +787,18 @@ joinBtn.addEventListener("click", function() {
     if (d.fromId !== myId && phase === "playing" && (!d.targetId || d.targetId === myId)) {
       spawnGhost(true, d.speed || ghostSpeed, d.relayCount || 0);
       if (d.combo) sharedCombo = d.combo;
+    }
+  });
+
+  channel.on("broadcast", { event: "jailbreak_visual" }, function(msg) {
+    var d = (msg && msg.payload) ? msg.payload : msg;
+    if (d.playerId && d.playerId !== myId) {
+      teammateViews[d.playerId] = {
+        playerY: d.playerY, ghostXs: d.ghostXs || [], hp: d.hp,
+        combo: d.combo, name: d.playerId, isP2: d.isP2,
+        hasShield: d.hasShield, hitAnim: d.hitAnim,
+        lastUpdate: performance.now()
+      };
     }
   });
 
