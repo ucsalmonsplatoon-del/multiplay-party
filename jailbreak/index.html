@@ -789,6 +789,18 @@ function broadcastState() {
     dodgeCount: dodgeCount, isP2: myIdx3 >= 1
   }});
 }
+function checkAllReady() {
+  if (phase !== "syncing") return;
+  var otherCount = allPlayers.length - 1;
+  var tmCount = Object.keys(teammates).length;
+  if (otherCount <= 0 || tmCount >= otherCount) {
+    // All teammates registered — start!
+    phase = "allready";
+    document.getElementById("wait-msg").innerHTML = '<div style="font-size:24px;">全員揃った！</div>';
+    setTimeout(function() { startGame(); }, 1000);
+  }
+}
+
 function broadcastJump() {
   if (!channel) return;
   channel.send({ type: "broadcast", event: "jailbreak_jump", payload: { playerId: myId } });
@@ -899,6 +911,9 @@ joinBtn.addEventListener("click", function() {
       }
       teammates[d.playerId].hp = d.hp;
       teammates[d.playerId].combo = d.combo || 0;
+      teammates[d.playerId].isP2 = d.isP2 || false;
+      teammates[d.playerId].name = d.playerId;
+      if (phase === "syncing") checkAllReady();
       teamScore = score;
       for (var k in playerScores) teamScore += playerScores[k].score;
       for (var k2 in playerScores) {
@@ -908,7 +923,18 @@ joinBtn.addEventListener("click", function() {
   });
 
   channel.on("broadcast", { event: "jailbreak_start" }, function() {
-    if (phase === "waiting") startGame();
+    if (phase === "waiting") {
+      phase = "syncing";
+      document.getElementById("wait-msg").innerHTML = '<div>全員の接続を確認中…</div>';
+      broadcastState();
+      checkAllReady();
+      // Keep broadcasting until all ready
+      var clientSyncPoll = setInterval(function() {
+        if (phase !== "syncing") { clearInterval(clientSyncPoll); return; }
+        broadcastState();
+        checkAllReady();
+      }, 500);
+    }
   });
 
   channel.on("broadcast", { event: "jailbreak_join" }, function(msg) {
@@ -930,7 +956,17 @@ joinBtn.addEventListener("click", function() {
         setTimeout(function() {
           if (phase === "waiting") {
             channel.send({ type: "broadcast", event: "jailbreak_start", payload: {} });
-            startGame();
+            // Host also enters sync phase
+            phase = "syncing";
+            document.getElementById("wait-msg").innerHTML = '<div>全員の接続を確認中…</div>';
+            broadcastState();
+            checkAllReady();
+            // Keep broadcasting until all ready
+            var syncPoll = setInterval(function() {
+              if (phase !== "syncing") { clearInterval(syncPoll); return; }
+              broadcastState();
+              checkAllReady();
+            }, 500);
           }
         }, 2000);
       }
