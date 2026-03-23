@@ -72,9 +72,9 @@ var GRAVITY = 0.28;
 var JUMP_FORCE = -7;
 var GHOST_SPEED_INIT = 1.3;
 var GHOST_SPEED_ACCEL = 0.02;
-var GAME_DURATION = 60;
+var GAME_DURATION = 90;
 var HP_MAX = 7;
-var ESCAPE_SCORE = 2000;
+var ESCAPE_SCORE = 5000;
 var SCROLL_SPEED = 1.5;
 
 var phase = "join";
@@ -777,6 +777,10 @@ function startCountdown() {
   phase = "countdown";
   countdownStart = performance.now();
   document.getElementById("wait-msg").style.display = "none";
+  // BGM starts when board is drawn (not waiting for GO)
+  bgm = new Audio("assets/bgm.mp3");
+  bgm.loop = true;
+  bgm.play().catch(function() {});
   setTimeout(function() { startPlaying(); }, 3500);
 }
 
@@ -787,8 +791,7 @@ function startPlaying() {
   playerY = GROUND_Y; playerVY = 0; isJumping = false;
   ghosts = []; ghostCooldown = 2500; scrollX = 0;
   gameStart = performance.now();
-  bgm = new Audio("assets/bgm.mp3");
-  bgm.loop = true; bgm.play().catch(function() {});
+  // BGM already playing from countdown
   setTimeout(function() { if (phase === "playing") spawnGhost(true); }, 2000);
 }
 
