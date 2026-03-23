@@ -260,18 +260,10 @@ addEventListener("keydown", function(e) {
 
 function spawnGhost(fromRight, speed, relayCount) {
   if (fromRight) {
-    ghosts.push({ x: 340, speed: speed || ghostSpeed, dir: -1, active: true, hit: false, relayCount: relayCount || 0 });
+    ghosts.push({ x: 340, speed: speed || ghostSpeed, dir: -1, fromRight: true, active: true, hit: false, relayCount: relayCount || 0 });
   } else {
-    ghosts.push({ x: -30, speed: speed || ghostSpeed, dir: 1, active: true, hit: false, relayCount: relayCount || 0 });
+    ghosts.push({ x: -30, speed: speed || ghostSpeed, dir: 1, fromRight: false, active: true, hit: false, relayCount: relayCount || 0 });
   }
-}
-
-// Determine my ghost direction based on player index
-function myGhostFromRight() {
-  var myIdx = 0;
-  for (var i = 0; i < allPlayers.length; i++) { if (allPlayers[i].id === myId) { myIdx = i; break; } }
-  // Even index (1P, 3P): ghosts from right. Odd index (2P, 4P): ghosts from left
-  return myIdx % 2 === 0;
 }
 
 function sendGhostToOpponent() {
@@ -280,10 +272,20 @@ function sendGhostToOpponent() {
   for (var i = 0; i < allPlayers.length; i++) { if (allPlayers[i].id === myId) { myIdx = i; break; } }
   var nextIdx = (myIdx + 1) % allPlayers.length;
   var targetId = allPlayers.length > 1 ? allPlayers[nextIdx].id : null;
-  // Find the relay count from the ghost that just exited
+  // Find the relay count and direction from the ghost that just exited
   var lastRelay = 0;
-  for (var ri = 0; ri < ghosts.length; ri++) { if (ghosts[ri].dodged && ghosts[ri].relayCount) lastRelay = ghosts[ri].relayCount; }
-  channel.send({ type: "broadcast", event: "jailbreak_ghost", payload: { fromId: myId, targetId: targetId, speed: ghostSpeed, combo: sharedCombo, relayCount: lastRelay } });
+  var lastFromRight = true;
+  for (var ri = 0; ri < ghosts.length; ri++) {
+    if (ghosts[ri].dodged && ghosts[ri].relayCount) {
+      lastRelay = ghosts[ri].relayCount;
+      lastFromRight = ghosts[ri].fromRight;
+    }
+  }
+  // Next player receives ghost from SAME direction (it passed through me)
+  channel.send({ type: "broadcast", event: "jailbreak_ghost", payload: {
+    fromId: myId, targetId: targetId, speed: ghostSpeed, combo: sharedCombo,
+    relayCount: lastRelay, fromRight: lastFromRight
+  }});
   broadcastState();
 }
 
@@ -318,8 +320,15 @@ function update(dt) {
   if (playerY >= GROUND_Y) { playerY = GROUND_Y; playerVY = 0; isJumping = false; }
 
   ghostCooldown -= dt;
-  if (ghosts.length === 0 && ghostCooldown <= 0 && allPlayers.length < 2) {
-    spawnGhost(true); ghostCooldown = 2000 / (1 + dodgeCount * 0.1);
+  if (ghosts.length === 0 && ghostCooldown <= 0) {
+    // Spawn from random direction
+    spawnGhost(Math.random() > 0.5);
+    if (allPlayers.length < 2) {
+      ghostCooldown = Math.max(800, 2500 - dodgeCount * 30);
+    } else {
+      // Multiplayer: less frequent self-spawn (relay ghosts fill the gap)
+      ghostCooldown = Math.max(1500, 4000 - dodgeCount * 30);
+    }
   }
 
   for (var i = 0; i < ghosts.length; i++) {
@@ -345,7 +354,7 @@ function update(dt) {
         // Dodged! Ghost keeps running through to left edge
         g.hit = true;
         g.dodged = true;
-        g.exitDir = -g.dir; // exit opposite direction (right→left or left→right)
+        g.exitDir = g.dir; // keep going same direction (right ghost → exits left, left ghost → exits right)
         var relayCount = (g.relayCount || 0) + 1;
         g.relayCount = relayCount;
         dodgeCount++;
@@ -389,7 +398,7 @@ function update(dt) {
   if (elapsed >= GAME_DURATION) endGame();
 
   if (allPlayers.length < 2 && ghosts.length === 0 && ghostCooldown <= 0) {
-    spawnGhost(myGhostFromRight()); ghostCooldown = Math.max(800, 2500 - dodgeCount * 30);
+    spawnGhost(Math.random() > 0.5); ghostCooldown = Math.max(800, 2500 - dodgeCount * 30);
   }
 
   // Update teammate local simulations
@@ -805,7 +814,7 @@ function startPlaying() {
   ghosts = []; ghostCooldown = 2500; scrollX = 0;
   gameStart = performance.now();
   // BGM already playing from countdown
-  setTimeout(function() { if (phase === "playing") spawnGhost(myGhostFromRight()); }, 2000);
+  setTimeout(function() { if (phase === "playing") spawnGhost(true); }, 2000);
 }
 
 function startGame() { startCountdown(); }
@@ -887,24 +896,22 @@ joinBtn.addEventListener("click", function() {
     var d = (msg && msg.payload) ? msg.payload : msg;
     if (d.fromId !== myId && phase === "playing") {
       if (!d.targetId || d.targetId === myId) {
-        // Ghost targeted at me — spawn from my direction
-        spawnGhost(myGhostFromRight(), d.speed || ghostSpeed, d.relayCount || 0);
+        // Ghost targeted at me — spawn from same direction as relay
+        var ghostDir = d.fromRight != null ? d.fromRight : true;
+        spawnGhost(ghostDir, d.speed || ghostSpeed, d.relayCount || 0);
         if (d.combo) sharedCombo = d.combo;
       }
       // Also show ghost spawning on the target teammate's local sim
       if (d.targetId && d.targetId !== myId && teammates[d.targetId]) {
-        // Teammate's direction based on their index
-        var tmIdx2 = 0;
-        for (var ai = 0; ai < allPlayers.length; ai++) { if (allPlayers[ai].id === d.targetId) { tmIdx2 = ai; break; } }
-        var tmFromRight = tmIdx2 % 2 === 0;
-        teammates[d.targetId].ghosts.push({ x: tmFromRight ? 340 : -30, speed: d.speed || ghostSpeed, dir: tmFromRight ? -1 : 1, active: true });
+        var tgDir = d.fromRight ? -1 : 1;
+        var tgX = d.fromRight ? 340 : -30;
+        teammates[d.targetId].ghosts.push({ x: tgX, speed: d.speed || ghostSpeed, dir: tgDir, active: true });
       }
     }
     if (d.fromId === myId && d.targetId && teammates[d.targetId]) {
-      var tmIdx3 = 0;
-      for (var ai2 = 0; ai2 < allPlayers.length; ai2++) { if (allPlayers[ai2].id === d.targetId) { tmIdx3 = ai2; break; } }
-      var tmFromRight2 = tmIdx3 % 2 === 0;
-      teammates[d.targetId].ghosts.push({ x: tmFromRight2 ? 340 : -30, speed: d.speed || ghostSpeed, dir: tmFromRight2 ? -1 : 1, active: true });
+      var tgDir2 = d.fromRight ? -1 : 1;
+      var tgX2 = d.fromRight ? 340 : -30;
+      teammates[d.targetId].ghosts.push({ x: tgX2, speed: d.speed || ghostSpeed, dir: tgDir2, active: true });
     }
   });
 
