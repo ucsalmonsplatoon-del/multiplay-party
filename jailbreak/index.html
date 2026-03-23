@@ -99,8 +99,8 @@ var ghostSpeed = GHOST_SPEED_INIT;
 var ghostCooldown = 0;
 var hasShield = false;  // shield gift from teammate
 
-// Teammate visual state (for mini-views)
-var teammateViews = {}; // playerId -> { playerY, ghosts:[{x}], hp, combo, name, isP2, lastUpdate }
+// Teammate local simulation
+var teammates = {}; // playerId -> { playerY, playerVY, isJumping, ghosts:[], hp, combo, isP2, hitAnim }
 
 var scrollX = 0;
 var countdownStart = 0;
@@ -204,7 +204,7 @@ function jump() {
   if (hitAnim) return;
   // Resume BGM on first user interaction (autoplay policy workaround)
   if (bgm && bgm.paused) bgm.play().catch(function() {});
-  if (!isJumping) { playerVY = JUMP_FORCE; isJumping = true; }
+  if (!isJumping) { playerVY = JUMP_FORCE; isJumping = true; broadcastJump(); }
 }
 
 function screenToGame(clientX, clientY) {
@@ -362,6 +362,7 @@ function update(dt) {
         if (channel) channel.send({ type: "broadcast", event: "jailbreak_combo_break", payload: { fromId: myId } });
         hitAnim = { phase: "spin_up", timer: 0, spinAngle: 0, vy: -12, dead: hp <= 0 };
         playerVY = 0; isJumping = true;
+        broadcastHit();
       }
     }
     // Off screen right (missed spawn)
@@ -378,8 +379,38 @@ function update(dt) {
     spawnGhost(true); ghostCooldown = Math.max(800, 2500 - dodgeCount * 30);
   }
 
-  // Send visual state for teammate mini-views
-  broadcastVisual();
+  // Update teammate local simulations
+  for (var tid in teammates) {
+    var tm = teammates[tid];
+    // Hit animation
+    if (tm.hitAnim) {
+      tm.hitAnim.timer += dt;
+      tm.hitAnim.spinAngle += 0.4;
+      if (tm.hitAnim.phase === "spin_up") {
+        tm.hitAnim.vy += 0.15; tm.playerY += tm.hitAnim.vy;
+        if (tm.hitAnim.vy > 0) tm.hitAnim.phase = "fall";
+      } else if (tm.hitAnim.phase === "fall") {
+        tm.hitAnim.vy += 0.4; tm.playerY += tm.hitAnim.vy;
+        if (tm.playerY >= GROUND_Y) {
+          if (tm.hitAnim.dead) { tm.hitAnim.phase = "buried"; tm.playerY = GROUND_Y + 10; }
+          else { tm.hitAnim.phase = "land"; tm.playerY = GROUND_Y; tm.hitAnim.vy = -3; }
+        }
+      } else if (tm.hitAnim.phase === "land") {
+        tm.hitAnim.vy += 0.5; tm.playerY += tm.hitAnim.vy; tm.hitAnim.spinAngle *= 0.9;
+        if (tm.playerY >= GROUND_Y) { tm.playerY = GROUND_Y; tm.hitAnim = null; tm.isJumping = false; }
+      }
+    } else {
+      // Normal physics
+      tm.playerVY += GRAVITY; tm.playerY += tm.playerVY;
+      if (tm.playerY >= GROUND_Y) { tm.playerY = GROUND_Y; tm.playerVY = 0; tm.isJumping = false; }
+    }
+    // Update teammate ghosts
+    for (var tgi = 0; tgi < tm.ghosts.length; tgi++) {
+      var tg = tm.ghosts[tgi];
+      if (tg.active) { tg.x += tg.dir * (tg.speed + SCROLL_SPEED); if (tg.x < -40) tg.active = false; }
+    }
+    tm.ghosts = tm.ghosts.filter(function(g) { return g.active; });
+  }
 }
 
 function render() {
@@ -389,7 +420,7 @@ function render() {
   var dpr = window.devicePixelRatio || 1;
 
   // Split screen: my game goes in my slot
-  var tmCount = Object.keys(teammateViews).length;
+  var tmCount = Object.keys(teammates).length;
   var totalSlots = 1 + tmCount;
   var mySlotIdx = 0;
   for (var msi = 0; msi < allPlayers.length; msi++) { if (allPlayers[msi].id === myId) { mySlotIdx = msi; break; } }
@@ -532,8 +563,8 @@ function render() {
 
   ctx.restore();
 
-  // ===== Teammate Full Views (stacked vertically) =====
-  var tmIds = Object.keys(teammateViews);
+  // ===== Teammate Full Views (stacked vertically, local sim) =====
+  var tmIds = Object.keys(teammates);
   var totalPlayers = 1 + tmIds.length;
   if (tmIds.length > 0 && totalPlayers > 1) {
     var dpr2 = window.devicePixelRatio || 1;
@@ -551,7 +582,7 @@ function render() {
     for (var ti = 0; ti < tmIds.length; ti++) {
       // Skip my slot
       if (tmSlot === mySlot) tmSlot++;
-      var tm = teammateViews[tmIds[ti]];
+      var tm = teammates[tmIds[ti]];
       var slotY = tmSlot * slotH;
       var tmSC = Math.min(canvasW / 320, slotH / 180);
 
@@ -588,11 +619,11 @@ function render() {
 
       ctx.save();
       ctx.shadowColor = "#fff"; ctx.shadowBlur = 3;
-      if (tm.hitAnim === "spin_up" || tm.hitAnim === "fall") {
+      if (tm.hitAnim && (tm.hitAnim.phase === "spin_up" || tm.hitAnim.phase === "fall")) {
         ctx.translate(playerX + tPW/2, tPY + tPH/2);
-        ctx.rotate(performance.now() / 100);
+        ctx.rotate(tm.hitAnim.spinAngle);
         ctx.drawImage(tPimg, -tPW/2, -tPH/2, tPW, tPH);
-      } else if (tm.hitAnim === "buried") {
+      } else if (tm.hitAnim && tm.hitAnim.phase === "buried") {
         ctx.translate(playerX + tPW/2, GROUND_Y + tPH/2);
         ctx.rotate(Math.PI);
         ctx.drawImage(tPimg, -tPW/2, -tPH/2, tPW, tPH);
@@ -602,12 +633,13 @@ function render() {
       }
       ctx.restore();
 
-      // Teammate ghosts
+      // Teammate ghosts (from local sim)
       var tGS = DO.ghost.s;
-      for (var tgi = 0; tgi < tm.ghostXs.length; tgi++) {
+      for (var tgi = 0; tgi < tm.ghosts.length; tgi++) {
+        if (!tm.ghosts[tgi].active) continue;
         ctx.save();
         ctx.shadowColor = "#ff4444"; ctx.shadowBlur = 5;
-        ctx.drawImage(IMG.obake, tm.ghostXs[tgi] - 8*tGS, GROUND_Y - IMG.obake.height*tGS + 5, IMG.obake.width*tGS, IMG.obake.height*tGS);
+        ctx.drawImage(IMG.obake, tm.ghosts[tgi].x - 8*tGS, GROUND_Y - IMG.obake.height*tGS + 5, IMG.obake.width*tGS, IMG.obake.height*tGS);
         ctx.restore();
       }
 
@@ -748,25 +780,22 @@ function endGame() {
   broadcastState();
 }
 
-var lastVisualBroadcast = 0;
 function broadcastState() {
   if (!channel) return;
-  channel.send({ type: "broadcast", event: "jailbreak_state", payload: { playerId: myId, score: score, hp: hp, combo: combo, maxCombo: maxCombo, dodgeCount: dodgeCount } });
-}
-// Send visual state for teammate mini-views (throttled)
-function broadcastVisual() {
-  if (!channel) return;
-  var now = performance.now();
-  if (now - lastVisualBroadcast < 100) return; // max 10fps
-  lastVisualBroadcast = now;
-  var ghostXs = [];
-  for (var i = 0; i < ghosts.length; i++) { if (ghosts[i].active) ghostXs.push(ghosts[i].x); }
   var myIdx3 = 0;
   for (var j = 0; j < allPlayers.length; j++) { if (allPlayers[j].id === myId) { myIdx3 = j; break; } }
-  channel.send({ type: "broadcast", event: "jailbreak_visual", payload: {
-    playerId: myId, playerY: playerY, ghostXs: ghostXs, hp: hp, combo: combo,
-    hasShield: hasShield, isP2: myIdx3 >= 1, hitAnim: hitAnim ? hitAnim.phase : null
+  channel.send({ type: "broadcast", event: "jailbreak_state", payload: {
+    playerId: myId, score: score, hp: hp, combo: combo, maxCombo: maxCombo,
+    dodgeCount: dodgeCount, isP2: myIdx3 >= 1
   }});
+}
+function broadcastJump() {
+  if (!channel) return;
+  channel.send({ type: "broadcast", event: "jailbreak_jump", payload: { playerId: myId } });
+}
+function broadcastHit() {
+  if (!channel) return;
+  channel.send({ type: "broadcast", event: "jailbreak_hit", payload: { playerId: myId, hp: hp, dead: hp <= 0 } });
 }
 
 function loop(ts) {
@@ -807,21 +836,40 @@ joinBtn.addEventListener("click", function() {
 
   channel.on("broadcast", { event: "jailbreak_ghost" }, function(msg) {
     var d = (msg && msg.payload) ? msg.payload : msg;
-    if (d.fromId !== myId && phase === "playing" && (!d.targetId || d.targetId === myId)) {
-      spawnGhost(true, d.speed || ghostSpeed, d.relayCount || 0);
-      if (d.combo) sharedCombo = d.combo;
+    if (d.fromId !== myId && phase === "playing") {
+      if (!d.targetId || d.targetId === myId) {
+        // Ghost targeted at me
+        spawnGhost(true, d.speed || ghostSpeed, d.relayCount || 0);
+        if (d.combo) sharedCombo = d.combo;
+      }
+      // Also show ghost spawning on the target teammate's local sim
+      if (d.targetId && d.targetId !== myId && teammates[d.targetId]) {
+        teammates[d.targetId].ghosts.push({ x: 340, speed: d.speed || ghostSpeed, dir: -1, active: true });
+      }
+    }
+    // If I sent a ghost, show it on target's local sim
+    if (d.fromId === myId && d.targetId && teammates[d.targetId]) {
+      teammates[d.targetId].ghosts.push({ x: 340, speed: d.speed || ghostSpeed, dir: -1, active: true });
     }
   });
 
-  channel.on("broadcast", { event: "jailbreak_visual" }, function(msg) {
+  // Teammate jump → make their local sim jump
+  channel.on("broadcast", { event: "jailbreak_jump" }, function(msg) {
     var d = (msg && msg.payload) ? msg.payload : msg;
-    if (d.playerId && d.playerId !== myId) {
-      teammateViews[d.playerId] = {
-        playerY: d.playerY, ghostXs: d.ghostXs || [], hp: d.hp,
-        combo: d.combo, name: d.playerId, isP2: d.isP2,
-        hasShield: d.hasShield, hitAnim: d.hitAnim,
-        lastUpdate: performance.now()
-      };
+    if (d.playerId && d.playerId !== myId && teammates[d.playerId]) {
+      var tm = teammates[d.playerId];
+      if (!tm.isJumping) { tm.playerVY = JUMP_FORCE; tm.isJumping = true; }
+    }
+  });
+
+  // Teammate hit → start their knockback anim
+  channel.on("broadcast", { event: "jailbreak_hit" }, function(msg) {
+    var d = (msg && msg.payload) ? msg.payload : msg;
+    if (d.playerId && d.playerId !== myId && teammates[d.playerId]) {
+      var tm = teammates[d.playerId];
+      tm.hp = d.hp;
+      tm.hitAnim = { phase: "spin_up", timer: 0, spinAngle: 0, vy: -12, dead: d.dead };
+      tm.playerVY = 0; tm.isJumping = true;
     }
   });
 
@@ -841,6 +889,16 @@ joinBtn.addEventListener("click", function() {
     var d = (msg && msg.payload) ? msg.payload : msg;
     if (d.playerId && d.playerId !== myId) {
       playerScores[d.playerId] = { score: d.score || 0, hp: d.hp != null ? d.hp : HP_MAX, name: d.playerId };
+      // Init teammate local sim if not exists
+      if (!teammates[d.playerId]) {
+        teammates[d.playerId] = {
+          playerY: GROUND_Y, playerVY: 0, isJumping: false,
+          ghosts: [], hp: d.hp || HP_MAX, combo: d.combo || 0,
+          isP2: d.isP2 || false, hitAnim: null, name: d.playerId
+        };
+      }
+      teammates[d.playerId].hp = d.hp;
+      teammates[d.playerId].combo = d.combo || 0;
       teamScore = score;
       for (var k in playerScores) teamScore += playerScores[k].score;
       for (var k2 in playerScores) {
