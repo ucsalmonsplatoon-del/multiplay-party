@@ -419,13 +419,11 @@ function render() {
   ctx.imageSmoothingEnabled = false;
   var dpr = window.devicePixelRatio || 1;
 
-  // Split screen: my game goes in my slot
+  // Split screen: my game is ALWAYS at the bottom
   var tmCount = Object.keys(teammates).length;
   var totalSlots = 1 + tmCount;
-  var mySlotIdx = 0;
-  for (var msi = 0; msi < allPlayers.length; msi++) { if (allPlayers[msi].id === myId) { mySlotIdx = msi; break; } }
   var slotH2 = Math.floor(H * dpr / totalSlots);
-  var mySlotY = mySlotIdx * slotH2;
+  var mySlotY = (totalSlots - 1) * slotH2; // bottom slot
   var mySC = Math.min(W * dpr / 320, slotH2 / 180);
 
   var ox = (W * dpr - 320 * mySC) / 2;
@@ -561,6 +559,12 @@ function render() {
     ctx.fillText("\u30BF\u30C3\u30D7 or \u30B9\u30DA\u30FC\u30B9\u3067\u30B8\u30E3\u30F3\u30D7\uFF01", 160, 110);
   }
 
+  // "YOU" label on my screen
+  if (totalSlots > 1) {
+    ctx.fillStyle = "#4FC3F7"; ctx.font = "bold 10px sans-serif"; ctx.textAlign = "left";
+    ctx.fillText("YOU - " + myId, 8, 168);
+  }
+
   ctx.restore();
 
   // ===== Teammate Full Views (stacked vertically, local sim) =====
@@ -575,13 +579,9 @@ function render() {
     var mySlot = 0;
     for (var ms = 0; ms < allPlayers.length; ms++) { if (allPlayers[ms].id === myId) { mySlot = ms; break; } }
 
-    // Reposition my game view to my slot
-    // (already drawn at full canvas — we need to restructure)
-    // Instead: draw teammates in the OTHER slots
-    var tmSlot = 0;
+    // Teammates go in top slots (0, 1, ...), my game is at bottom
     for (var ti = 0; ti < tmIds.length; ti++) {
-      // Skip my slot
-      if (tmSlot === mySlot) tmSlot++;
+      var tmSlot = ti; // top slots
       var tm = teammates[tmIds[ti]];
       var slotY = tmSlot * slotH;
       var tmSC = Math.min(canvasW / 320, slotH / 180);
@@ -597,8 +597,9 @@ function render() {
       ctx.scale(tmSC, tmSC);
       ctx.imageSmoothingEnabled = false;
 
-      // Background
-      ctx.fillStyle = "#2a2a3e";
+      // Background (slightly different tint per teammate)
+      var bgColors = ["#2a2a3e", "#2a3e2a", "#3e2a2a"];
+      ctx.fillStyle = bgColors[ti % bgColors.length];
       ctx.fillRect(-10, -10, 340, 200);
 
       // Floor
@@ -649,9 +650,9 @@ function render() {
         ctx.fillText(thi < tm.hp ? "\u2764\uFE0F" : "\u{1F5A4}", 8 + thi * 16, 20);
       }
 
-      // Name label
-      ctx.fillStyle = "#4FC3F7"; ctx.font = "bold 10px sans-serif"; ctx.textAlign = "right";
-      ctx.fillText(tm.name + (tm.hasShield ? " \uD83D\uDEE1\uFE0F" : ""), 312, 18);
+      // Name label (top-left of teammate view)
+      ctx.fillStyle = "#4FC3F7"; ctx.font = "bold 10px sans-serif"; ctx.textAlign = "left";
+      ctx.fillText(tm.name + (tm.hasShield ? " \uD83D\uDEE1\uFE0F" : ""), 8, 168);
 
       // Combo
       if (tm.combo > 1) {
@@ -903,15 +904,17 @@ joinBtn.addEventListener("click", function() {
       playerScores[d.playerId] = { score: d.score || 0, hp: d.hp != null ? d.hp : HP_MAX, name: d.playerId };
       // Init teammate local sim if not exists
       if (!teammates[d.playerId]) {
+        // Determine player index from allPlayers order
+        var pIdx = -1;
+        for (var pi2 = 0; pi2 < allPlayers.length; pi2++) { if (allPlayers[pi2].id === d.playerId) { pIdx = pi2; break; } }
         teammates[d.playerId] = {
           playerY: GROUND_Y, playerVY: 0, isJumping: false,
           ghosts: [], hp: d.hp || HP_MAX, combo: d.combo || 0,
-          isP2: d.isP2 || false, hitAnim: null, name: d.playerId
+          isP2: pIdx >= 1, hitAnim: null, name: d.playerId
         };
       }
       teammates[d.playerId].hp = d.hp;
       teammates[d.playerId].combo = d.combo || 0;
-      teammates[d.playerId].isP2 = d.isP2 || false;
       teammates[d.playerId].name = d.playerId;
       if (phase === "syncing") checkAllReady();
       teamScore = score;
@@ -942,7 +945,18 @@ joinBtn.addEventListener("click", function() {
     if (d.playerId) {
       var found = false;
       for (var i = 0; i < allPlayers.length; i++) { if (allPlayers[i].id === d.playerId) { found = true; break; } }
-      if (!found) allPlayers.push({ id: d.playerId });
+      if (!found) {
+        allPlayers.push({ id: d.playerId });
+        // Init teammate sim for non-self players
+        if (d.playerId !== myId) {
+          var tmIdx = allPlayers.length - 1;
+          teammates[d.playerId] = {
+            playerY: GROUND_Y, playerVY: 0, isJumping: false,
+            ghosts: [], hp: HP_MAX, combo: 0,
+            isP2: tmIdx >= 1, hitAnim: null, name: d.playerId
+          };
+        }
+      }
     }
   });
 
