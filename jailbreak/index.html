@@ -387,10 +387,24 @@ function render() {
   ctx.save();
   ctx.imageSmoothingEnabled = false;
   var dpr = window.devicePixelRatio || 1;
-  var ox = (W * dpr - 320 * SC) / 2;
-  var oy = (H * dpr - 180 * SC) / 2;
+
+  // Split screen: my game goes in my slot
+  var tmCount = Object.keys(teammateViews).length;
+  var totalSlots = 1 + tmCount;
+  var mySlotIdx = 0;
+  for (var msi = 0; msi < allPlayers.length; msi++) { if (allPlayers[msi].id === myId) { mySlotIdx = msi; break; } }
+  var slotH2 = Math.floor(H * dpr / totalSlots);
+  var mySlotY = mySlotIdx * slotH2;
+  var mySC = Math.min(W * dpr / 320, slotH2 / 180);
+
+  var ox = (W * dpr - 320 * mySC) / 2;
+  var oy = mySlotY + (slotH2 - 180 * mySC) / 2;
+
+  ctx.beginPath();
+  ctx.rect(0, mySlotY, W * dpr, slotH2);
+  ctx.clip();
   ctx.translate(ox, oy);
-  ctx.scale(SC, SC);
+  ctx.scale(mySC, mySC);
 
   // Sky/outside background (revealed as jail scrolls away)
   var grad = ctx.createLinearGradient(0, 0, 0, DO.floor.y);
@@ -518,98 +532,107 @@ function render() {
 
   ctx.restore();
 
-  // ===== Teammate Mini-Views =====
+  // ===== Teammate Full Views (stacked vertically) =====
   var tmIds = Object.keys(teammateViews);
-  if (tmIds.length > 0) {
+  var totalPlayers = 1 + tmIds.length;
+  if (tmIds.length > 0 && totalPlayers > 1) {
     var dpr2 = window.devicePixelRatio || 1;
-    var miniH = Math.floor(H * dpr2 * 0.18); // 18% of screen height
-    var miniW = Math.floor(W * dpr2 * 0.9);
-    var miniSC = miniH / 180;
+    var canvasH = H * dpr2;
+    var canvasW = W * dpr2;
+    var slotH = Math.floor(canvasH / totalPlayers);
+    // My game is in slot index based on my position in allPlayers
+    var mySlot = 0;
+    for (var ms = 0; ms < allPlayers.length; ms++) { if (allPlayers[ms].id === myId) { mySlot = ms; break; } }
 
-    for (var ti = 0; ti < tmIds.length && ti < 2; ti++) {
+    // Reposition my game view to my slot
+    // (already drawn at full canvas — we need to restructure)
+    // Instead: draw teammates in the OTHER slots
+    var tmSlot = 0;
+    for (var ti = 0; ti < tmIds.length; ti++) {
+      // Skip my slot
+      if (tmSlot === mySlot) tmSlot++;
       var tm = teammateViews[tmIds[ti]];
-      var miniY = ti === 0 ? 4 : (H * dpr2 - miniH - 4); // top or bottom
+      var slotY = tmSlot * slotH;
+      var tmSC = Math.min(canvasW / 320, slotH / 180);
 
-      ctx.save();
-      ctx.globalAlpha = 0.85;
-
-      // Mini background
-      ctx.fillStyle = "#1a1a2e";
-      ctx.fillRect((W * dpr2 - miniW) / 2, miniY, miniW, miniH);
-      ctx.strokeStyle = tm.hp > 0 ? "#4FC3F7" : "#f44";
-      ctx.lineWidth = 1;
-      ctx.strokeRect((W * dpr2 - miniW) / 2, miniY, miniW, miniH);
-
-      // Clip to mini area
       ctx.save();
       ctx.beginPath();
-      ctx.rect((W * dpr2 - miniW) / 2, miniY, miniW, miniH);
+      ctx.rect(0, slotY, canvasW, slotH);
       ctx.clip();
 
-      var mox = (W * dpr2 - miniW) / 2;
-      ctx.translate(mox, miniY);
-      ctx.scale(miniSC, miniSC);
+      var tmox = (canvasW - 320 * tmSC) / 2;
+      var tmoy = slotY + (slotH - 180 * tmSC) / 2;
+      ctx.translate(tmox, tmoy);
+      ctx.scale(tmSC, tmSC);
       ctx.imageSmoothingEnabled = false;
 
-      // Mini floor
-      ctx.fillStyle = "#3a3a50";
-      ctx.fillRect(0, 0, 320, 180);
-      var mFloorTileW = IMG.floor1.width * DO.floor.s;
-      for (var mfx = 0; mfx < 340; mfx += mFloorTileW) {
-        ctx.drawImage(IMG.floor1, mfx, DO.floor.y, mFloorTileW, IMG.floor1.height * DO.floor.s);
+      // Background
+      ctx.fillStyle = "#2a2a3e";
+      ctx.fillRect(-10, -10, 340, 200);
+
+      // Floor
+      var tFloorW = IMG.floor1.width * DO.floor.s;
+      for (var tfx = 0; tfx < 340; tfx += tFloorW) {
+        ctx.drawImage(IMG.floor1, tfx, DO.floor.y, tFloorW, IMG.floor1.height * DO.floor.s);
       }
 
-      // Mini player character
-      var mFrame = Math.floor(performance.now() / 200) % 2;
-      var mPimg = tm.isP2
-        ? (mFrame === 0 ? IMG.pri2 : IMG.pri2_2)
-        : (mFrame === 0 ? IMG.prio1 : IMG.prio1_2);
-      var mPS = DO.player.s;
-      var mPW = mPimg.width * mPS;
-      var mPH = mPimg.height * mPS;
-      var mPY = (tm.playerY || GROUND_Y) - mPH + 5;
+      // Teammate character
+      var tFrame = Math.floor(performance.now() / 200) % 2;
+      var tPimg = tm.isP2
+        ? (tFrame === 0 ? IMG.pri2 : IMG.pri2_2)
+        : (tFrame === 0 ? IMG.prio1 : IMG.prio1_2);
+      var tPS = DO.player.s;
+      var tPW = tPimg.width * tPS;
+      var tPH = tPimg.height * tPS;
+      var tPY = (tm.playerY || GROUND_Y) - tPH + 5;
 
+      ctx.save();
+      ctx.shadowColor = "#fff"; ctx.shadowBlur = 3;
       if (tm.hitAnim === "spin_up" || tm.hitAnim === "fall") {
-        ctx.save();
-        ctx.translate(playerX + mPW/2, mPY + mPH/2);
+        ctx.translate(playerX + tPW/2, tPY + tPH/2);
         ctx.rotate(performance.now() / 100);
-        ctx.drawImage(mPimg, -mPW/2, -mPH/2, mPW, mPH);
-        ctx.restore();
+        ctx.drawImage(tPimg, -tPW/2, -tPH/2, tPW, tPH);
       } else if (tm.hitAnim === "buried") {
-        ctx.save();
-        ctx.translate(playerX + mPW/2, GROUND_Y + mPH/2);
+        ctx.translate(playerX + tPW/2, GROUND_Y + tPH/2);
         ctx.rotate(Math.PI);
-        ctx.drawImage(mPimg, -mPW/2, -mPH/2, mPW, mPH);
-        ctx.restore();
+        ctx.drawImage(tPimg, -tPW/2, -tPH/2, tPW, tPH);
       } else {
-        ctx.drawImage(mPimg, playerX, mPY, mPW, mPH);
+        ctx.translate(playerX + tPW/2, tPY + tPH/2);
+        ctx.drawImage(tPimg, -tPW/2, -tPH/2, tPW, tPH);
+      }
+      ctx.restore();
+
+      // Teammate ghosts
+      var tGS = DO.ghost.s;
+      for (var tgi = 0; tgi < tm.ghostXs.length; tgi++) {
+        ctx.save();
+        ctx.shadowColor = "#ff4444"; ctx.shadowBlur = 5;
+        ctx.drawImage(IMG.obake, tm.ghostXs[tgi] - 8*tGS, GROUND_Y - IMG.obake.height*tGS + 5, IMG.obake.width*tGS, IMG.obake.height*tGS);
+        ctx.restore();
       }
 
-      // Mini ghosts
-      var mGS = DO.ghost.s;
-      for (var mgi = 0; mgi < tm.ghostXs.length; mgi++) {
-        ctx.drawImage(IMG.obake, tm.ghostXs[mgi] - 8*mGS, GROUND_Y - IMG.obake.height*mGS + 5, IMG.obake.width*mGS, IMG.obake.height*mGS);
+      // HP hearts
+      ctx.font = "12px sans-serif";
+      for (var thi = 0; thi < HP_MAX; thi++) {
+        ctx.fillText(thi < tm.hp ? "\u2764\uFE0F" : "\u{1F5A4}", 8 + thi * 16, 20);
       }
 
-      // Mini HP
-      ctx.font = "10px sans-serif";
-      for (var mhi = 0; mhi < HP_MAX; mhi++) {
-        ctx.fillText(mhi < tm.hp ? "\u2764\uFE0F" : "\u{1F5A4}", 4 + mhi * 12, 15);
-      }
-
-      // Name + shield
-      ctx.fillStyle = "#fff"; ctx.font = "bold 8px sans-serif"; ctx.textAlign = "right";
-      ctx.fillText(tm.name + (tm.hasShield ? " \uD83D\uDEE1" : ""), 316, 15);
+      // Name label
+      ctx.fillStyle = "#4FC3F7"; ctx.font = "bold 10px sans-serif"; ctx.textAlign = "right";
+      ctx.fillText(tm.name + (tm.hasShield ? " \uD83D\uDEE1\uFE0F" : ""), 312, 18);
 
       // Combo
       if (tm.combo > 1) {
-        ctx.fillStyle = "#FFD740"; ctx.font = "bold 10px sans-serif"; ctx.textAlign = "center";
-        ctx.fillText(tm.combo + " COMBO", 160, 90);
+        ctx.fillStyle = "#FFD740"; ctx.font = "bold 14px sans-serif"; ctx.textAlign = "center";
+        ctx.fillText("\uD83D\uDD25 " + tm.combo + " RALLY!", 160, 80);
       }
 
+      // Divider line
+      ctx.strokeStyle = "#4FC3F7"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(320, 0); ctx.stroke();
+
       ctx.restore(); // clip
-      ctx.globalAlpha = 1;
-      ctx.restore(); // save
+      tmSlot++;
     }
   }
 }
